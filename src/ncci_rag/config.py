@@ -13,7 +13,11 @@ from pathlib import Path
 try:  # optional: load a local .env file if python-dotenv is installed
     from dotenv import load_dotenv
 
-    load_dotenv()
+    # The project's .env wins over variables inherited from the shell. Otherwise a stale
+    # OPENAI_API_KEY exported in ~/.zshrc silently replaces the key the README tells you
+    # to put in .env (a real 401 seen during setup). Hosted deployments have no .env, so
+    # their platform secrets are unaffected.
+    load_dotenv(override=True)
 except ImportError:  # pragma: no cover
     pass
 

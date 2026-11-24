@@ -136,6 +136,7 @@ PYTHONPATH=src python eval/run_eval.py --answers                   # also grades
 | Message | Fix |
 |---|---|
 | `OPENAI_API_KEY is not set` | Step 4: check that `.env` exists in the project folder and has the key |
+| `Error code: 401 - Incorrect API key provided: sk-...XXXX` | The last 4 characters show which key was used. Check that `.env` in the project folder has your current key **and is saved** (not the `sk-...` placeholder). The project's `.env` wins over an `OPENAI_API_KEY` exported in `~/.zshrc`; still, remove or update old exports there (`grep -n OPENAI_API_KEY ~/.zshrc`). Restart the app after editing `.env` |
 | `No index at data/index.sqlite` | Step 5 (or just start the Streamlit app, which builds it) |
 | `ModuleNotFoundError: ncci_rag` | Add `PYTHONPATH=src` before the command, or run `python -m pip install -e .` once |
 | `ModuleNotFoundError: pdfplumber` (traceback shows `.pyenv/versions/...`) | A global `streamlit` ran instead of the one in `.venv`. Activate `.venv` and use `python -m streamlit run app/streamlit_app.py` |
