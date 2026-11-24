@@ -14,3 +14,4 @@ data/edits/
 .coverage
 .ruff_cache/
 htmlcov/
+.streamlit/secrets.toml

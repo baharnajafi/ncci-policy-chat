@@ -1,8 +1,13 @@
+# Used by `pip install -r requirements.txt` and by hosted platforms (Streamlit Community
+# Cloud, Hugging Face Spaces). The extra index serves CPU-only PyTorch wheels: on Linux
+# the default PyPI wheel bundles CUDA (several GB), which a CPU container cannot use.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 pdfplumber>=0.11
 numpy>=1.26
 openai>=1.54
 python-dotenv>=1.0
 streamlit>=1.38
 # Cross-encoder reranker (pulls in PyTorch; set NCCI_RERANKER=none to run without it)
+torch>=2.2
 sentence-transformers>=3.0
-pytest>=8

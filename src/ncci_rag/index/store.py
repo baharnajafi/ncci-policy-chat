@@ -20,6 +20,7 @@ import numpy as np
 
 from ..ingest.codes import find_ranges, in_range
 from ..models import Chunk
+from .db import SharedConnection
 
 SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -57,7 +58,7 @@ def fts_query(text: str) -> str:
 class IndexStore:
     def __init__(self, path: Path):
         self.path = Path(path)
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn = SharedConnection(self.path)  # shared by Streamlit's threads; see db.py
         self._matrix: np.ndarray | None = None
         self._rowids: np.ndarray | None = None
         self._chunks: dict[int, Chunk] | None = None

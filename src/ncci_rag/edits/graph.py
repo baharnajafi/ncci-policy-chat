@@ -29,11 +29,11 @@ its effective and deletion dates. Lookups default to the file's effective date.
 from __future__ import annotations
 
 import re
-import sqlite3
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
 
+from ..index.db import SharedConnection
 from ..ingest.codes import find_codes
 from ..models import Chunk
 
@@ -77,7 +77,7 @@ def _date(d: int | None) -> str:
 
 class EditGraph:
     def __init__(self, db_path: Path):
-        self.conn = sqlite3.connect(Path(db_path), check_same_thread=False)
+        self.conn = SharedConnection(Path(db_path))
         self.meta = dict(self.conn.execute("SELECT key, value FROM meta"))
         self.version = self.meta.get("ptp_version", "unknown version")
         self.effective = int(self.meta.get("ptp_effective") or 0)

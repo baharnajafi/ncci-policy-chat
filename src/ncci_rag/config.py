@@ -38,16 +38,20 @@ class Settings:
     chat_model: str = field(default_factory=lambda: _env("NCCI_CHAT_MODEL", "gpt-4.1"))
     reranker_model: str = field(default_factory=lambda: _env("NCCI_RERANKER", "BAAI/bge-reranker-base"))  # "none" to disable
 
-    # Retrieval
-    candidates_per_retriever: int = int(_env("NCCI_CANDIDATES", "40"))
-    rerank_pool: int = int(_env("NCCI_RERANK_POOL", "30"))
-    top_k: int = int(_env("NCCI_TOP_K", "6"))
-    rrf_k: int = int(_env("NCCI_RRF_K", "60"))
+    # Retrieval. Every default is read when Settings() is created, not at import, so env
+    # vars set later (e.g. from Streamlit secrets) still apply.
+    candidates_per_retriever: int = field(default_factory=lambda: int(_env("NCCI_CANDIDATES", "40")))
+    rerank_pool: int = field(default_factory=lambda: int(_env("NCCI_RERANK_POOL", "30")))
+    top_k: int = field(default_factory=lambda: int(_env("NCCI_TOP_K", "6")))
+    rrf_k: int = field(default_factory=lambda: int(_env("NCCI_RRF_K", "60")))
     # Relevance gate: below this, answer "not in the manual" without calling the LLM.
     # Calibrated with eval/run_eval.py (see README). Reranker scores are 0-1;
     # if the reranker is disabled, the gate uses the top dense cosine similarity instead.
-    min_relevance: float = float(_env("NCCI_MIN_RELEVANCE", "0.10"))
-    min_dense_similarity: float = float(_env("NCCI_MIN_DENSE_SIM", "0.30"))
+    min_relevance: float = field(default_factory=lambda: float(_env("NCCI_MIN_RELEVANCE", "0.10")))
+    min_dense_similarity: float = field(default_factory=lambda: float(_env("NCCI_MIN_DENSE_SIM", "0.30")))
+
+    # Hosted app: questions allowed per browser session (0 = unlimited), to bound API cost.
+    max_questions_per_session: int = field(default_factory=lambda: int(_env("NCCI_MAX_QUESTIONS", "0")))
 
     @property
     def use_reranker(self) -> bool:

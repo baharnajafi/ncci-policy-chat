@@ -7,12 +7,13 @@ chunking change only pays for chunks whose text actually changed.
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 import time
 from pathlib import Path
 from typing import Protocol
 
 import numpy as np
+
+from .db import SharedConnection
 
 
 class Embedder(Protocol):
@@ -38,7 +39,7 @@ class OpenAIEmbedder:
         self._cache = None
         if cache_path:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self._cache = sqlite3.connect(cache_path)
+            self._cache = SharedConnection(cache_path)  # used from Streamlit's threads; see db.py
             self._cache.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, vec BLOB, dim INTEGER)")
 
     def close(self) -> None:

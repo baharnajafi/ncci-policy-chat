@@ -45,6 +45,8 @@ PYTHONPATH=src streamlit run app/streamlit_app.py                    # web UI
 PYTHONPATH=src python -m ncci_rag ask --debug "What is an MUE?"     # CLI, with retrieval scores
 ```
 
+**Hosted demo:** the app can run with a public link on Streamlit Community Cloud. It needs no data in the repo: secrets come from the platform, the first start downloads the manual and builds the index, and an optional password and per-session question limit protect the API key. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 If the CMS link has moved, download the PDF from the [CMS NCCI Medicare page](https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits/medicare-ncci-policy-manual) and save it under `data/`.
 
 To run without the reranker (no PyTorch download), set `NCCI_RERANKER=none`. To use Azure OpenAI, set `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`; the model settings then name your deployments.
@@ -172,6 +174,8 @@ src/ncci_rag/
   retrieval/rerank.py    cross-encoder reranker
   edits/loader.py        CMS PTP/MUE zip files -> data/edits.sqlite
   edits/graph.py         edit tables as a property graph; facts + links to manual sections
+  index/db.py            one SQLite connection shared safely by Streamlit's threads
+  bootstrap.py           hosted first start: secrets -> env, download PDF, build index; password, limit
   generation/answer.py   structured-output prompt and citation validation
   pipeline.py            build_index() and QAPipeline.ask()
   __main__.py            CLI: ingest | ask | chat

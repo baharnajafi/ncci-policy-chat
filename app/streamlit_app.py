@@ -3,16 +3,31 @@
 Deliberately simple: the point of the exercise is retrieval and grounding, so the UI
 shows the answer, numbered citations you can expand to read the exact passage, and
 an optional retrieval-debug view (scores and per-retriever ranks).
+
+Hosted use (see docs/DEPLOY.md): secrets come from the platform's secret store; the
+first start downloads the manual and builds the index; an optional shared password
+and a per-session question limit protect the API key.
 """
 
 from __future__ import annotations
 
+import contextlib
+import os
 import sys
 from pathlib import Path
 
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]
+os.chdir(ROOT)  # data/ paths are relative to the repository root, wherever the app is started from
+sys.path.insert(0, str(ROOT / "src"))
+
+from ncci_rag.bootstrap import apply_secrets, ensure_ready, password_ok, questions_left  # noqa: E402
+
+# Streamlit secrets (hosted) -> environment, before any settings are read. Locally there
+# is usually no secrets file, and .env is used instead.
+with contextlib.suppress(Exception):
+    apply_secrets(dict(st.secrets))
 
 from ncci_rag.config import get_settings  # noqa: E402
 from ncci_rag.pipeline import QAPipeline  # noqa: E402
@@ -21,16 +36,36 @@ st.set_page_config(page_title="NCCI Policy Manual Chat", layout="centered")
 st.title("Medicare NCCI Policy Manual (2026)")
 st.caption(
     "Answers come only from the manual (cited by chapter, section, and page) and, for specific codes, "
-    "the CMS NCCI edit tables (cited by file version and edit)."
+    "the CMS NCCI edit tables when they are loaded (cited by file version and edit)."
 )
 
+# ---------------------------------------------------------------- access
+if not st.session_state.get("authenticated"):
+    expected = os.getenv("APP_PASSWORD")
+    if password_ok(None, expected):
+        st.session_state.authenticated = True
+    else:
+        given = st.text_input("Password", type="password")
+        if given and password_ok(given, expected):
+            st.session_state.authenticated = True
+            st.rerun()
+        if given:
+            st.error("Wrong password.")
+        st.stop()
+
+settings = get_settings()
 CHAPTERS = ["All", "Intro", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII"]
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner="First start: downloading the manual and building the index (about a minute)...")
 def load_pipeline() -> QAPipeline:
-    return QAPipeline(get_settings())
+    s = get_settings()
+    ensure_ready(s, log=lambda msg: None)
+    return QAPipeline(s)
 
+
+asked = st.session_state.setdefault("asked", 0)
+left = questions_left(asked, settings.max_questions_per_session)
 
 with st.sidebar:
     chapter = st.selectbox("Limit to chapter", CHAPTERS, index=0)
@@ -44,11 +79,13 @@ with st.sidebar:
         "- Can 29880 and 29881 be reported together?  _(edit tables)_\n"
         "- What is the MUE for 64450?  _(edit tables)_"
     )
-    st.caption("Edit tables loaded: " + ("yes" if Path("data/edits.sqlite").exists() else "no (run `python -m ncci_rag load-edits`)"))
+    st.caption("Edit tables loaded: " + ("yes" if settings.edits_db.exists() else "no (manual only)"))
+    if left is not None:
+        st.caption(f"Questions left in this session: {left}")
 
 try:
     qa = load_pipeline()
-except Exception as e:  # missing index or key: show how to fix it
+except Exception as e:  # noqa: BLE001 - missing key, PDF, or index: show how to fix it
     st.error(str(e))
     st.stop()
 
@@ -88,15 +125,25 @@ def render_answer(answer, result=None, debug=False) -> None:
         )
 
 
-for turn in st.session_state.history:
+history = st.session_state.history
+for i, turn in enumerate(history):
     with st.chat_message(turn["role"]):
         if turn["role"] == "user":
             st.markdown(turn["content"])
+            # Streamlit stops a running answer when a new question arrives. A completed run
+            # always stores the answer right after its question, so a question without one
+            # was interrupted: say so instead of leaving it unanswered.
+            answered = i + 1 < len(history) and history[i + 1]["role"] == "assistant"
+            if not answered:
+                st.caption("No answer: the next question was sent before this one finished. Ask it again if needed.")
         else:
             render_answer(turn["answer"], turn.get("result"), debug)
 
-question = st.chat_input("Ask about NCCI coding policy...")
+if left == 0:
+    st.info("This session has reached its question limit. Open a new session to ask more.")
+question = st.chat_input("Ask about NCCI coding policy...", disabled=left == 0)
 if question:
+    st.session_state.asked += 1
     st.session_state.history.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
