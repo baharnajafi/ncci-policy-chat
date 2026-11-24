@@ -16,10 +16,10 @@ In the UI, each citation expands to show the exact passage.
 
 ## Quick start
 
-Requires Python 3.10+ and an OpenAI API key.
+Requires Python 3.10+ and an OpenAI API key. A beginner-friendly, step-by-step version (including VS Code setup and test questions) is in [`docs/RUN_LOCALLY.md`](docs/RUN_LOCALLY.md).
 
 ```bash
-git clone https://github.com/<you>/ncci-policy-chat && cd ncci-policy-chat
+git clone https://github.com/baharnajafi/ncci-policy-chat && cd ncci-policy-chat
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
