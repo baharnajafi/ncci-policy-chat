@@ -25,9 +25,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from ncci_rag.bootstrap import apply_secrets, ensure_ready, password_ok, questions_left  # noqa: E402
 
 # Streamlit secrets (hosted) -> environment, before any settings are read. Locally there
-# is usually no secrets file, and .env is used instead.
+# is usually no secrets file and .env is used instead. Reading st.secrets without a file
+# shows a red "No secrets found" box even when the error is caught, so probe first.
 with contextlib.suppress(Exception):
-    apply_secrets(dict(st.secrets))
+    if st.secrets.load_if_toml_exists():
+        apply_secrets(dict(st.secrets))
 
 from ncci_rag.config import get_settings  # noqa: E402
 from ncci_rag.pipeline import QAPipeline  # noqa: E402

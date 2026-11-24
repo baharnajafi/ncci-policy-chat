@@ -41,7 +41,7 @@ PYTHONPATH=src python -m ncci_rag ingest
 PYTHONPATH=src python -m ncci_rag load-edits
 
 # 4. Ask
-PYTHONPATH=src streamlit run app/streamlit_app.py                    # web UI
+PYTHONPATH=src python -m streamlit run app/streamlit_app.py          # web UI
 PYTHONPATH=src python -m ncci_rag ask --debug "What is an MUE?"     # CLI, with retrieval scores
 ```
 

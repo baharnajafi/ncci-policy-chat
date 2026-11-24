@@ -37,9 +37,9 @@ project folder.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # [Windows: .venv\Scripts\activate]
-pip install --upgrade pip
-pip install -r requirements.txt    # a few minutes: includes PyTorch (CPU) and Streamlit
-pip install -e ".[dev]"            # pytest and ruff, for running the tests
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt    # a few minutes: includes PyTorch (CPU) and Streamlit
+python -m pip install -e ".[dev]"            # pytest and ruff, for running the tests
 ```
 
 The prompt now starts with `(.venv)`. In VS Code, press **Cmd+Shift+P → "Python: Select
@@ -90,8 +90,13 @@ Without this step everything still works; answers then come from the manual alon
 ## 7. Start the app and open it in your browser
 
 ```bash
-PYTHONPATH=src streamlit run app/streamlit_app.py
+PYTHONPATH=src python -m streamlit run app/streamlit_app.py
 ```
+
+Use `python -m streamlit`, not plain `streamlit`: with pyenv (or conda), a global `streamlit`
+can come first on the PATH and run outside the virtual environment (you then get
+`ModuleNotFoundError: No module named 'pdfplumber'`). `python -m` always uses the Python of
+the active `.venv`.
 
 The browser opens http://localhost:8501 by itself (if not, open that address). The first
 question takes a few seconds longer while the reranker model downloads (about 1 GB, once).
@@ -132,7 +137,9 @@ PYTHONPATH=src python eval/run_eval.py --answers                   # also grades
 |---|---|
 | `OPENAI_API_KEY is not set` | Step 4: check that `.env` exists in the project folder and has the key |
 | `No index at data/index.sqlite` | Step 5 (or just start the Streamlit app, which builds it) |
-| `ModuleNotFoundError: ncci_rag` | Add `PYTHONPATH=src` before the command, or run `pip install -e .` once |
+| `ModuleNotFoundError: ncci_rag` | Add `PYTHONPATH=src` before the command, or run `python -m pip install -e .` once |
+| `ModuleNotFoundError: pdfplumber` (traceback shows `.pyenv/versions/...`) | A global `streamlit` ran instead of the one in `.venv`. Activate `.venv` and use `python -m streamlit run app/streamlit_app.py` |
+| Red box "No secrets found" | Fixed in the app (it only reads secrets when `.streamlit/secrets.toml` exists). Run `git pull` |
 | `Index was built with ... but NCCI_EMBED_MODEL is ...` | You changed the embedding model; run step 5 again |
-| Port 8501 is busy | `streamlit run app/streamlit_app.py --server.port 8502` |
+| Port 8501 is busy | `python -m streamlit run app/streamlit_app.py --server.port 8502` |
 | `command not found: python` | Use `python3`, or activate the virtual environment (step 3) |
