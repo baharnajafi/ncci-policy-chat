@@ -1,0 +1,8 @@
+pdfplumber>=0.11
+numpy>=1.26
+openai>=1.54
+python-dotenv>=1.0
+streamlit>=1.38
+# Cross-encoder reranker (pulls in PyTorch; set NCCI_RERANKER=none to run without it)
+sentence-transformers>=3.0
+pytest>=8

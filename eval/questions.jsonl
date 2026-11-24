@@ -1,0 +1,24 @@
+{"id": "q01", "question": "When is it appropriate to use modifier 59?", "expected": ["I.E"]}
+{"id": "q02", "question": "What do modifiers XE, XS, XP, and XU mean, and how do they relate to modifier 59?", "expected": ["I.E"]}
+{"id": "q03", "question": "What is a Medically Unlikely Edit (MUE)?", "expected": ["I.V"]}
+{"id": "q04", "question": "What does a Correct Coding Modifier Indicator of 0 versus 1 mean for a PTP edit?", "expected": ["I.E"]}
+{"id": "q05", "question": "Can an E&M service be reported on the same day as a minor surgical procedure?", "expected": ["I.D", "I.E", "III.B", "IV.B", "V.B", "VI.B", "VII.B", "VIII.B", "IX.B", "XII.B", "XIII.B"]}
+{"id": "q06", "question": "Can an add-on code be reported without its primary procedure code?", "expected": ["I.R", "I.W"]}
+{"id": "q07", "question": "When should an unlisted procedure code be reported?", "expected": ["I.T"]}
+{"id": "q08", "question": "What does the CPT 'separate procedure' designation mean for reporting?", "expected": ["I.J"]}
+{"id": "q09", "question": "How does NCCI handle procedures that are mutually exclusive?", "expected": ["I.P"]}
+{"id": "q10", "question": "How should monitored anesthesia care be reported?", "expected": ["II.D"]}
+{"id": "q11", "question": "How is Mohs micrographic surgery reported with other skin procedures?", "expected": ["III.F"]}
+{"id": "q12", "question": "If a diagnostic arthroscopy leads to a surgical arthroscopy in the same session, can both be reported?", "expected": ["IV.E"]}
+{"id": "q13", "question": "Can a diagnostic endoscopy be reported separately when a surgical endoscopy is performed at the same session?", "expected": ["VI.C", "I.E", "V.C", "VII.C"]}
+{"id": "q14", "question": "How are presumptive and definitive drug testing codes reported?", "expected": ["X.E"]}
+{"id": "q15", "question": "Can hydration be reported separately when given with chemotherapy administration?", "expected": ["XI.B", "XI.N"]}
+{"id": "q16", "question": "How can a provider request reconsideration of an NCCI edit or appeal a denial?", "expected": ["Intro.submitting-an-appeal", "Intro.correspondence-with-cms-", "I.V"]}
+{"id": "q17", "question": "What is the purpose of the NCCI program?", "expected": ["Intro.purpose", "Intro.ncci-program-background", "Intro.overview", "I.A"]}
+{"id": "q18", "question": "Is the E&M visit where the decision for major surgery is made separately reportable, and with which modifier?", "expected": ["I.D", "I.E", "III.B", "IV.B", "V.B", "VI.B", "VII.B", "VIII.B", "IX.B"]}
+{"id": "q19", "question": "When can CPT code 69990 for the operating microscope be reported?", "expected": ["VIII.F", "I.E"]}
+{"id": "q20", "question": "Which edits apply to CPT 64450 nerve blocks given by the anesthesiologist?", "expected": ["II.B", "II.E"]}
+{"id": "n01", "question": "What is the 2026 Medicare Part B monthly premium?", "expected": [], "negative": true}
+{"id": "n02", "question": "How do I reset my password for the CMS Enterprise Portal?", "expected": [], "negative": true}
+{"id": "n03", "question": "Which insulins are on the Medicare Part D formulary?", "expected": [], "negative": true}
+{"id": "n04", "question": "What is the average hospital price of an MRI in Ohio?", "expected": [], "negative": true}
