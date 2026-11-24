@@ -22,8 +22,8 @@ def test_modifier_lists_and_false_positives():
 
 
 def test_codes_and_ranges():
-    text = "CPT codes 64400-64530, J1234, 0042T and 99213; P.L. 101-239, revised 1/1/2026"
-    assert find_codes(text) == ["64400", "J1234", "0042T", "99213"]
+    text = "CPT codes 64400-64530, J1234, 0042T and 99213; 0001A, 0002M; P.L. 101-239, revised 1/1/2026"
+    assert find_codes(text) == ["64400", "J1234", "0042T", "99213", "0001A", "0002M"]
     assert find_ranges(text) == [("64400", "64530")]
     assert in_range("64450", "64400", "64530")
     assert not in_range("0042T", "00000", "01999")  # Category III is not a 5-digit CPT code
@@ -181,3 +181,84 @@ def test_parser_on_real_manual():
     assert ch4.code_range and "20000" in ch4.code_range
     mods = next(s for s in sections if s.chapter_id == "I" and s.section_id == "E")
     assert mods.paragraphs[0].page_label.startswith("I-")
+
+    # Graph links: each PTP rationale must point at the Chapter I section with that topic.
+    from ncci_rag.edits.graph import MODIFIER_SECTION, MUE_SECTION, RATIONALE_SECTIONS
+
+    titles = {f"{s.chapter_id}.{s.section_id}": s.section_title.lower() for s in sections}
+    assert "modifier" in titles[MODIFIER_SECTION] and "medically unlikely" in titles[MUE_SECTION]
+    for rationale, sec in RATIONALE_SECTIONS.items():
+        words = [w for w in rationale.replace("/", " ").split() if len(w) > 5 and w not in {"manual", "column"}]
+        assert any(w in titles[sec] for w in words), (rationale, sec, titles[sec])
+
+
+# ---------------------------------------------------------------- edit tables (graph)
+def _edit_zips(tmp_path):
+    """Tiny files in the CMS layouts: tab-separated PTP TXT and MUE CSV, each zipped."""
+    import zipfile
+
+    ptp = (
+        "CPT only copyright 2025 American Medical Association.\t\t\t\t\t\t\r\n"
+        "Column 1\tColumn 2\t*=in existence\tEffective\tDeletion\tModifier\tPTP Edit Rationale\r\n"
+        "29880\t29881\t\t19960101\t*\t1\tHCPCS/CPT procedure code definition\r\n"
+        "0001A\t0591T\t\t20220101\t20231231\t1\tCPT Manual or CMS manual coding instruction\r\n"
+        "29880\t20610\t\t20000101\t*\t1\tMutually exclusive procedures\r\n"
+    )
+    mue = 'copyright text,,,\r\n"HCPCS/\r\nCPT Code",MUE Values,MUE Adjudication Indicator,MUE Rationale\r\n64450,10,3 Date of Service Edit: Clinical,Clinical: Data\r\n'
+    with zipfile.ZipFile(tmp_path / "ptp-f1.zip", "w") as z:
+        z.writestr("ccipra-v323r0-f1.TXT", ptp)
+    with zipfile.ZipFile(tmp_path / "mue.zip", "w") as z:
+        z.writestr("MCR_MUE_PractitionerServices_Eff_10-01-2026.csv", mue)
+    return tmp_path
+
+
+def test_edit_loader_and_lookups(tmp_path):
+    from ncci_rag.edits.graph import EditGraph
+    from ncci_rag.edits.loader import load_edits
+
+    db = load_edits(_edit_zips(tmp_path), tmp_path / "edits.sqlite", log=lambda *_: None)
+    g = EditGraph(db)
+    assert g.version == "v323r0" and g.mue_effective == 20261001
+
+    active = g.pair_fact("29881", "29880", 20261001)  # either order finds the edit
+    assert active.chunk.chunk_id == "PTP.29880-29881" and active.chunk.is_fact
+    assert "Column One code 29880" in active.chunk.text and "Modifier indicator 1" in active.chunk.text
+    assert active.linked_sections == ["I.H", "I.E"]  # rationale section, then modifier indicators
+
+    deleted = g.pair_fact("0001A", "0591T", 20261001)
+    assert "not active on 2026-10-01" in deleted.chunk.text
+    assert "active on 2023-06-01" in g.pair_fact("0001A", "0591T", 20230601).chunk.text  # date of service matters
+
+    none = g.pair_fact("93000", "99214", 20261001)
+    assert "contains no edit between codes 93000 and 99214" in none.chunk.text
+
+    mue = g.mue_fact("64450")
+    assert "MUE value of 10" in mue.chunk.text and mue.linked_sections == ["I.V"]
+    assert "no MUE value" in g.mue_fact("97110").chunk.text
+
+    summary = g.neighbour_fact("29880", 20261001)
+    assert "Column One code in 2 edits" in summary.chunk.text and "20610" in summary.chunk.text
+
+    ids = lambda q, codes: [f.chunk.chunk_id for f in g.lookup(q, codes)]  # noqa: E731
+    assert ids("Can 29880 and 29881 be billed together?", ["29880", "29881"]) == ["PTP.29880-29881"]
+    assert ids("What is the MUE for 64450?", ["64450"]) == ["MUE.64450"]
+    assert ids("Which codes are bundled into 29880?", ["29880"]) == ["PTP.29880.summary"]
+    assert ids("What does 64450 describe?", ["64450"]) == []  # no edit or MUE intent
+
+
+def test_facts_are_labelled_f_and_pass_the_claim_check(tmp_path):
+    from ncci_rag.edits.graph import EditGraph
+    from ncci_rag.edits.loader import load_edits
+
+    g = EditGraph(load_edits(_edit_zips(tmp_path), tmp_path / "edits.sqlite", log=lambda *_: None))
+    fact = ScoredChunk(g.mue_fact("64450").chunk, 1.0)
+    manual = ScoredChunk(_chunk("I.V.01", "An MUE is the maximum units of service for a code."), 0.9)
+    text, by_id = format_sources([fact, manual])
+    assert set(by_id) == {"F1", "S1"} and text.startswith("[F1] Medicare NCCI MUE table")
+    raw = {"answerable": True, "not_covered": "", "reason": "", "sentences": [
+        {"text": "The MUE value for 64450 is 10.", "source_ids": ["F1"], "quotes": ["code 64450 has an MUE value of 10 unit(s) of service"]},
+        {"text": "The MUE value for 64450 is 1.", "source_ids": ["S1"], "quotes": ["An MUE is the maximum units of service"]},
+    ]}
+    ans = parse_and_validate("q", raw, by_id, [fact, manual])
+    assert [s.text for s in ans.sentences] == ["The MUE value for 64450 is 10."]
+    assert ans.citations[0].chunk.heading.startswith("Medicare NCCI MUE table") and ans.citations[0].chunk.pages == "MUE 64450"

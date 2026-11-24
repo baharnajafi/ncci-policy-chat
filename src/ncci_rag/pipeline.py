@@ -7,13 +7,14 @@ import time
 from pathlib import Path
 
 from .config import Settings, get_settings
+from .edits.graph import EditGraph
 from .generation.answer import generate_answer
 from .index.embedder import OpenAIEmbedder
 from .index.store import IndexStore
 from .ingest.chunker import chunk_sections
 from .ingest.pdf_parser import parse_manual
 from .llm_client import get_client
-from .models import Answer
+from .models import Answer, ScoredChunk
 from .retrieval.hybrid import HybridRetriever, RetrievalResult
 
 
@@ -61,7 +62,9 @@ class QAPipeline:
                 f"{self.settings.embed_model}. Query and passage vectors must come from the same model; re-run ingest."
             )
         self.embedder = OpenAIEmbedder(self.settings.embed_model, cache_path=self.settings.cache_path)
-        self.retriever = HybridRetriever(self.store, self.embedder, self.settings)
+        # The CMS edit tables are optional: without them, answers come from the manual alone.
+        self.edits = EditGraph(self.settings.edits_db) if self.settings.edits_db.exists() else None
+        self.retriever = HybridRetriever(self.store, self.embedder, self.settings, self.edits)
 
     def retrieve(self, question: str, chapter: str | None = None) -> RetrievalResult:
         return self.retriever.retrieve(question, chapter)
@@ -76,5 +79,6 @@ class QAPipeline:
                 "Try rephrasing, or name the code, modifier, or chapter you mean.",
             )
             return answer, result
-        answer = generate_answer(question, result.passages, self.settings.chat_model, get_client())
+        facts = [ScoredChunk(f.chunk, 1.0, {"graph": i}) for i, f in enumerate(result.facts, start=1)]
+        answer = generate_answer(question, facts + result.passages, self.settings.chat_model, get_client())
         return answer, result

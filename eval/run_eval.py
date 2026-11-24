@@ -10,8 +10,11 @@ Question types in eval/questions.jsonl:
   answer cites a correct section.
 * **Negative** questions are clearly outside the manual (Part B premium, a portal
   password). They set the noise floor for the relevance gate.
-* **Hard negatives** are in-domain questions the manual cannot answer: an MUE value for
-  a specific code, a PTP code pair, a fee schedule amount. They look like coding
+* **Fact** questions need the CMS edit tables (an MUE value, a PTP pair, a deleted
+  edit, a code's edit summary). Each names the fact that should be looked up and
+  regexes the answer must (and must not) match. Skipped if the tables are not loaded.
+* **Hard negatives** are in-domain questions neither the manual nor the edit tables
+  answer: a fee schedule amount, an OPPS rate, ICD-10 codes, Medicaid policy. They look like coding
   questions, so retrieval finds relevant-looking passages and the gate usually lets
   them through. They test the *answer* layer: the model must abstain, or answer only
   the related policy without inventing the value. Each one has either
@@ -53,6 +56,8 @@ def is_relevant(chunk_id: str, expected: list[str]) -> bool:
 
 
 def kind_of(item: dict) -> str:
+    if item.get("fact"):
+        return "fact"
     if item.get("hard_negative"):
         return "hard"
     return "negative" if item.get("negative") else "positive"
@@ -66,6 +71,13 @@ def hard_negative_clean(item: dict, answer) -> bool:
     if item.get("expect_abstain"):
         return False
     return not any(re.search(p, answer.text, re.I) for p in item.get("must_not_match", []))
+
+
+def fact_correct(item: dict, answer) -> bool:
+    text = answer.text
+    return (answer.answerable
+            and all(re.search(p, text, re.I) for p in item.get("must_match", []))
+            and not any(re.search(p, text, re.I) for p in item.get("must_not_match", [])))
 
 
 def md(text: str) -> str:
@@ -83,8 +95,11 @@ def main() -> int:
     qa = QAPipeline(settings)
     items = [json.loads(line) for line in Path(args.questions).read_text().splitlines() if line.strip()]
 
+    if qa.edits is None:
+        print("Edit tables not loaded (python -m ncci_rag load-edits): skipping fact questions.")
+        items = [it for it in items if not it.get("fact")]
     rows = []
-    scores: dict[str, list[float]] = {"positive": [], "negative": [], "hard": []}
+    scores: dict[str, list[float]] = {"positive": [], "negative": [], "hard": [], "fact": []}
     hits1 = hits3 = hitsk = 0
     mrr = 0.0
     for it in items:
@@ -107,6 +122,10 @@ def main() -> int:
             for name in ("keyword", "vector", "code"):
                 r = [p.ranks.get(name) for p in res.passages if is_relevant(p.chunk.chunk_id, it["expected"]) and p.ranks.get(name)]
                 row[f"{name}_rank"] = min(r) if r else None
+        if kind == "fact":
+            row["fact_found"] = it["fact"] in [f.chunk.chunk_id for f in res.facts]
+            row["linked_in_passages"] = bool(it["expected"]) and any(
+                is_relevant(p.chunk.chunk_id, it["expected"]) for p in res.passages)
         if args.answers and (kind != "negative" or res.passed_gate):
             answer, _ = qa.ask(it["question"])
             row["answerable"] = answer.answerable
@@ -116,6 +135,10 @@ def main() -> int:
                 row["cited_expected"] = any(is_relevant(c.chunk.chunk_id, it["expected"]) for c in answer.citations)
             if kind == "hard":
                 row["clean"] = hard_negative_clean(it, answer)
+            if kind == "fact":
+                row["fact_cited"] = it["fact"] in [c.chunk.chunk_id for c in answer.citations]
+                row["manual_cited"] = any(not c.chunk.is_fact for c in answer.citations)
+                row["correct"] = fact_correct(it, answer)
         rows.append(row)
 
     pos, neg, hard = scores["positive"], scores["negative"], scores["hard"]
@@ -138,6 +161,8 @@ def main() -> int:
                 f"| {r['id']} | {r['first_relevant_rank']} | {r['keyword_rank']} | {r['vector_rank']} | {r['code_rank']} | "
                 f"{r['top_relevance']} | {gate if r['gate'] else 'BLOCKED'} | {md(r['question'])} |"
             )
+        elif r["kind"] == "fact":
+            lines.append(f"| {r['id']} | (fact: {'found' if r['fact_found'] else 'NOT FOUND'}) | | | | {r['top_relevance']} | {gate} | {md(r['question'])} |")
         else:
             label = "(negative)" if r["kind"] == "negative" else "(hard negative)"
             lines.append(f"| {r['id']} | {label} | | | | {r['top_relevance']} | {gate} | {md(r['question'])} |")
@@ -162,6 +187,12 @@ def main() -> int:
                   f"(top scores {', '.join(f'{s:.2f}' for s in hard)}). These are in-domain, so retrieval "
                   "correctly finds related policy; the answer layer must handle them."]
 
+    fact_rows = [r for r in rows if r["kind"] == "fact"]
+    if fact_rows:
+        lines += ["", f"**Edit-table facts:** looked up {sum(r['fact_found'] for r in fact_rows)}/{len(fact_rows)}; "
+                  f"linked manual section in the passages {sum(r['linked_in_passages'] for r in fact_rows)}/"
+                  f"{sum(1 for it in items if it.get('fact') and it['expected'])} (questions with an expected section)"]
+
     if args.answers:
         answered = [r for r in rows if "answer" in r]
         pos_rows = [r for r in answered if r["kind"] == "positive"]
@@ -171,6 +202,10 @@ def main() -> int:
             "", "## Answers", "",
             f"- Positives answered: {sum(r['answerable'] for r in pos_rows)}/{len(pos_rows)}; "
             f"citing an expected section: {sum(r['cited_expected'] for r in pos_rows)}/{len(pos_rows)}",
+            *([f"- Fact questions answered correctly: **{sum(r['correct'] for r in answered if r['kind'] == 'fact')}/{len([r for r in answered if r['kind'] == 'fact'])}**; "
+               f"citing the table row: {sum(r['fact_cited'] for r in answered if r['kind'] == 'fact')}; "
+               f"also citing the manual (the why): {sum(r['manual_cited'] for r in answered if r['kind'] == 'fact')}"]
+              if any(r["kind"] == "fact" for r in answered) else []),
             f"- Hard negatives handled cleanly (abstained, or no invented value): "
             f"**{sum(r['clean'] for r in hard_rows)}/{len(hard_rows)}**",
             f"- Sentences removed by the claim check: {n_rej} "
@@ -184,6 +219,8 @@ def main() -> int:
                 tags.append(f"cited_expected={r['cited_expected']}")
             if "clean" in r:
                 tags.append(f"clean={r['clean']}")
+            if "correct" in r:
+                tags.append(f"correct={r['correct']} fact_cited={r['fact_cited']} manual_cited={r['manual_cited']}")
             lines.append(f"**{r['id']}** {r['question']}  \n{' '.join(tags)}  \n{r['answer']}")
             for rej in r["rejected"]:
                 lines.append(f"  \n_removed:_ {rej}")

@@ -16,6 +16,7 @@ Decisions, the alternatives I considered, and what I would build next. The goal 
 | Reranking | Cross-encoder `bge-reranker-base` over the top 30 | LLM-as-reranker; none | It improves the order, and it provides an absolute relevance score for the gate. An LLM reranker costs more and is slower for this. |
 | Abstention | (a) deterministic gate on the top reranker score before the LLM; (b) `answerable=false` from the model | Prompt-only "say I don't know" | Prompt-only abstention is unreliable when the context is plausible but irrelevant. The gate is cheap and calibrated on labelled negatives. It also never sends irrelevant text to the model. |
 | Citations | Per-sentence source IDs in strict JSON; validated in code; rendered from stored metadata | Ask the model to write citations in prose | The model cannot invent a page number, because it never writes one. Unsupported sentences are removed rather than shown. |
+| Edit tables | CMS PTP/MUE files in SQLite, read as a property graph; rows become cited facts; rationales link to manual sections | Neo4j; ask the LLM to recall edits; leave codes to the manual | The manual has almost no pair-level facts, and the model's memory of edits is unreliable and dated. One- or two-hop exact lookups need an index, not a graph engine. The rationale → section link is the useful "graph" part: it joins the what (table) to the why (manual). |
 | Claim check | Per-sentence verbatim quotes; quote must be in the cited passage; every named code must be in the quote's source paragraph (or a range there) | Trust chunk-level citations; LLM-as-judge on every sentence | A valid chunk citation does not mean a valid claim (the 64450 / trichiasis case in the README). The lexical checks are deterministic, free, and testable offline. Paragraph scope matches how the manual writes rules (one per paragraph or list item). An entailment judge is the next layer, for claims with no code in them. |
 | Storage | One SQLite file, built atomically (`.building` → rename); meta records the PDF hash and embed model | Postgres + pgvector | No infrastructure for a reviewer to run. The meta check refuses to query an index built with a different embedding model. |
 | Provider | OpenAI, or Azure OpenAI through one env switch | — | Swapping to Azure is a configuration change, not a code change. |
@@ -36,17 +37,14 @@ Every tunable (models, candidate counts, k, threshold) is an environment variabl
 
 **1. Conversational follow-ups.** Rewrite the question using the chat history before retrieval ("what about with modifier 25?" → a standalone question). The history is used only for retrieval; the answer is still grounded only in retrieved passages.
 
-**2. Join the NCCI edit tables (a knowledge graph).** The manual is the *why*; the quarterly PTP and MUE files are the *what*. A small graph makes questions like "can 64450 and 64447 be billed together, and why?" answerable exactly:
+**2. Grow the knowledge graph.** A first version is built (README section 6): PTP edges with dates and modifier indicators, MUE values on codes, and links from each edit's rationale to the manual section that explains it. Next steps, in order of value:
+- Load the hospital outpatient PTP file and the DME MUE table, keyed by setting, and ask the user which setting applies.
+- Add-on code edits (Type 1/2/3 primary codes) as `(AddOn)-[:REQUIRES_PRIMARY]->(Code)` edges.
+- Parse the date of service from the question, and load several quarters so "was this edit active in March?" works.
+- Parse the manual's 31 explicit cross-references ("see Chapter I, Section V") into `(Section)-[:REFERS_TO]->(Section)` edges for one-hop expansion.
+- A Neo4j (or similar) store becomes worth it when traversals get variable-length (bundling chains, "which modifiers could bypass any edit between these five codes") or when coverage data joins in (LCD/NCD → ICD-10 → code). Today every query is one or two hops on an exact key, which indexed SQLite handles in under a millisecond.
 
-```
-(Code)-[:IN_RANGE]->(CodeRange)-[:GOVERNED_BY]->(Chapter)-[:HAS_SECTION]->(Section)
-(Code)-[:PTP_EDIT {modifier_indicator, effective, deleted}]->(Code)
-(Code)-[:HAS_MUE {units, adjudication_indicator}]->(MUE)
-(Section)-[:MENTIONS]->(Code | Modifier)
-(Modifier)-[:BYPASSES]->(PTP_EDIT where indicator = 1)
-```
-
-A typed lookup ("is there a PTP edit for A + B? what is the indicator?") answers the fact. Retrieval over the manual explains the policy. The answer cites both. The current code index and chapter routing are the first layer of this graph (codes, ranges, and mentions), stored as tables.
+**Why not GraphRAG-style community summaries.** That approach suits broad, "what are the themes" questions over unstructured text. This manual is already a clean hierarchy (chapter → section → paragraph), and users ask narrow, exact questions. Retrieval already reaches hit@1 19/20, so an LLM-built entity graph would add cost and a new error source without fixing a measured problem. The graph that helps is the one that joins in **structured facts the text does not contain**.
 
 **3. Production path.**
 - **Index:** at a scale of many manuals or versions, use a managed hybrid index (Azure AI Search or OpenSearch with BM25, HNSW, and a semantic reranker) or Postgres with pgvector and full-text search. Keep the same retriever interface.

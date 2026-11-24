@@ -13,13 +13,21 @@ Why RRF: the three retrievers produce scores on different scales (BM25, cosine,
 mention counts). RRF ignores the scales and fuses ranks: score = sum of 1/(k + rank).
 It needs no tuning beyond k (60 is the usual default) and is robust when one
 retriever returns nothing.
+
+Graph lookup (optional, when the CMS edit tables are loaded): codes in the question
+are looked up in the PTP/MUE tables. The rows found become **facts** that are passed
+to the model next to the manual passages. Each fact links to the manual sections that
+explain it (edit rationale -> Chapter I section, modifier indicator -> I.E, MUE -> I.V);
+those sections form a fifth ranked list ("graph"), and at least one of their chunks is
+kept in the final passages, so the answer can say both what applies and why.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..config import Settings
+from ..edits.graph import EditGraph, Fact
 from ..index.embedder import Embedder
 from ..index.store import IndexStore
 from ..ingest.codes import chapter_for_code, find_codes, find_modifiers
@@ -48,11 +56,13 @@ class RetrievalResult:
     query_codes: list[str]
     query_modifiers: list[str]
     routed_chapter: str | None
+    facts: list[Fact] = field(default_factory=list)  # rows from the CMS edit tables
 
 
 class HybridRetriever:
-    def __init__(self, store: IndexStore, embedder: Embedder, settings: Settings):
+    def __init__(self, store: IndexStore, embedder: Embedder, settings: Settings, edits: EditGraph | None = None):
         self.store = store
+        self.edits = edits
         self.embedder = embedder
         self.settings = settings
         self.reranker = CrossEncoderReranker(settings.reranker_model) if settings.use_reranker else None
@@ -79,6 +89,13 @@ class HybridRetriever:
             if routed:
                 lists["chapter"] = [r for r, _ in self.store.vector_search(qvec, n, routed)]
 
+        # Graph lookup: exact facts for the asked-about codes, plus the manual sections
+        # that explain them (one hop: edit -> rationale -> section).
+        facts = self.edits.lookup(question, codes) if self.edits and codes else []
+        linked = {sec for f in facts for sec in f.linked_sections}
+        if linked:
+            lists["graph"] = self.store.section_search(qvec, linked, n)
+
         fused = rrf(lists, k=s.rrf_k, weights={"chapter": 0.5})
         chunks = self.store.chunks()
         pool = sorted(fused.items(), key=lambda kv: -kv[1][0])[: s.rerank_pool]
@@ -98,11 +115,24 @@ class HybridRetriever:
             top = dense[0][1] if dense else 0.0
             passed = top >= s.min_dense_similarity
 
+        top_k = candidates[: s.top_k]
+        if linked and not any(_section(c) in linked for c in top_k):
+            best_linked = next((c for c in candidates if _section(c) in linked), None)
+            if best_linked is not None:
+                top_k = top_k[: s.top_k - 1] + [best_linked]  # keep the "why" for the fact
+        if facts:
+            passed = True  # an exact table row is relevant evidence by construction
+
         return RetrievalResult(
-            passages=candidates[: s.top_k],
+            passages=top_k,
             top_relevance=top,
             passed_gate=passed,
             query_codes=codes,
             query_modifiers=modifiers,
             routed_chapter=routed,
+            facts=facts,
         )
+
+
+def _section(c: ScoredChunk) -> str:
+    return f"{c.chunk.chapter_id}.{c.chunk.section_id}"

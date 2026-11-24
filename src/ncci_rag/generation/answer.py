@@ -41,14 +41,15 @@ import re
 from ..ingest.codes import find_codes, find_ranges, in_range
 from ..models import Answer, AnswerSentence, Citation, RejectedSentence, ScoredChunk
 
-SYSTEM_PROMPT = """You answer questions about the CMS 2026 Medicare NCCI Policy Manual for Medicare Services.
+SYSTEM_PROMPT = """You answer questions about the CMS 2026 Medicare NCCI Policy Manual for Medicare Services, and, when provided, the CMS Medicare NCCI edit tables.
 
 Rules:
 - Use ONLY the numbered source passages provided. Do not use outside knowledge, even if you know the answer.
 - For every sentence, first copy one or more short quotes (a phrase or sentence, copied exactly) from the passages that directly support it, then list the IDs of those passages (e.g. ["S2"]), then write the sentence.
 - Name a specific HCPCS/CPT code in a sentence only if your quotes for that sentence contain that code or a code range that includes it. If the manual states a general rule but does not name the asked-about code, state the general rule and say the manual does not name that code.
 - A rule or value that a passage states for one code or code range must never be attributed to a different code.
-- The manual explains policy. Most MUE unit values, the PTP code-pair edits, and their modifier indicators are published in separate CMS data files, not in the manual. Give such a value only if a passage states it for that exact code; otherwise say the manual does not list it, and give the related policy the passages state.
+- Sources labelled F are exact rows from the CMS Medicare NCCI edit tables (PTP code-pair edits, MUE values). Sources labelled S are passages of the policy manual. For a question about specific codes, state the fact from the F source (edit, modifier indicator, MUE value, or that there is no edit), then explain the policy behind it from the S sources. A "no edit" fact means the practitioner edit file has no edit for that pair; say so, and do not conclude that the codes are always payable together.
+- The manual explains policy. Most MUE unit values, the PTP code-pair edits, and their modifier indicators are published in separate CMS data files, not in the manual. Give such a value only if an F source or a passage states it for that exact code; otherwise say it is not listed, and give the related policy the passages state.
 - Quote codes, modifiers, and numeric values exactly as written in the sources.
 - If the passages do not contain the answer, set "answerable" to false and explain briefly in "reason" what is missing. Do not guess.
 - If the passages answer only part of the question, answer that part, and put what the manual does not address in "not_covered" (one short sentence, no citation). Leave "not_covered" empty when nothing is missing. Do not put "the manual does not say..." statements in "sentences".
@@ -126,12 +127,19 @@ def unanchored_codes(sentence: str, quotes: list[str], context: list[str] | None
 
 
 def format_sources(passages: list[ScoredChunk]) -> tuple[str, dict[str, ScoredChunk]]:
+    """Label facts from the edit tables F1..Fn and manual passages S1..Sn."""
     by_id: dict[str, ScoredChunk] = {}
     blocks = []
-    for i, p in enumerate(passages, start=1):
-        sid = f"S{i}"
-        by_id[sid] = p
+    n_fact = n_manual = 0
+    for p in passages:
         c = p.chunk
+        if c.is_fact:
+            n_fact += 1
+            sid = f"F{n_fact}"
+        else:
+            n_manual += 1
+            sid = f"S{n_manual}"
+        by_id[sid] = p
         blocks.append(f"[{sid}] {c.heading}, {c.pages}\n{c.text}")
     return "\n\n---\n\n".join(blocks), by_id
 

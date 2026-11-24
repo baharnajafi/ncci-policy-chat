@@ -153,6 +153,22 @@ class IndexStore:
                 break
         return out
 
+    def section_search(self, query_vec: np.ndarray, sections: set[str], k: int) -> list[int]:
+        """Chunks of the given sections ("I.P"), most similar to the query first. Used for
+        graph expansion: an edit's rationale points to the section that explains it."""
+        if self._matrix is None:
+            self._load_vectors()
+        chunks = self.chunks()
+        order = np.argsort(-(self._matrix @ query_vec.astype(np.float32)))
+        out = []
+        for i in order:
+            c = chunks[int(self._rowids[i])]
+            if f"{c.chapter_id}.{c.section_id}" in sections:
+                out.append(int(self._rowids[i]))
+                if len(out) == k:
+                    break
+        return out
+
     def code_search(self, codes: list[str], modifiers: list[str], k: int) -> list[int]:
         """Chunks that mention the asked-about codes/modifiers, most mentions first.
         A code also matches chunks that mention a range containing it (e.g. 64450 in

@@ -10,3 +10,4 @@ data/*.building
 eval/report.md
 .DS_Store
 .claude/
+data/edits/

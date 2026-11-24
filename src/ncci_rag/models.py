@@ -44,10 +44,20 @@ class Chunk:
     text: str  # the passage itself, shown to the user and to the model
     codes: list[str] = field(default_factory=list)  # CPT/HCPCS codes mentioned
     modifiers: list[str] = field(default_factory=list)  # modifiers mentioned
+    # "manual" for passages of the policy manual; "ptp" / "mue" for facts looked up in
+    # the CMS edit tables (see edits/graph.py). Facts reuse this type so citation,
+    # claim-check, and UI code treat both kinds of evidence the same way.
+    kind: str = "manual"
+
+    @property
+    def is_fact(self) -> bool:
+        return self.kind != "manual"
 
     @property
     def heading(self) -> str:
         """Human-readable location, used in citations."""
+        if self.is_fact:
+            return self.chapter_title  # e.g. "Medicare NCCI PTP edits (practitioner, v323r0)"
         chapter = "Introduction" if self.chapter_id == "Intro" else f"Chapter {self.chapter_id}"
         if self.chapter_id == "Acronyms":
             chapter = "List of Acronyms"
@@ -60,6 +70,8 @@ class Chunk:
 
     @property
     def pages(self) -> str:
+        if self.is_fact:
+            return self.section_title  # e.g. "edit 93000 / 99214"
         if self.label_start == self.label_end:
             return f"p. {self.label_start} (PDF p. {self.page_start})"
         return f"pp. {self.label_start}–{self.label_end} (PDF pp. {self.page_start}–{self.page_end})"
@@ -68,6 +80,8 @@ class Chunk:
     def context_header(self) -> str:
         """Prepended to the text before embedding and keyword indexing, so a chunk is
         retrievable by the chapter and section it belongs to, not only by its own words."""
+        if self.is_fact:
+            return self.chapter_title
         rng = f" [{self.code_range}]" if self.code_range else ""
         return f"{self.heading}{rng}"
 

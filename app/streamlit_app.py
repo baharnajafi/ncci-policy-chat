@@ -19,7 +19,10 @@ from ncci_rag.pipeline import QAPipeline  # noqa: E402
 
 st.set_page_config(page_title="NCCI Policy Manual Chat", layout="centered")
 st.title("Medicare NCCI Policy Manual (2026)")
-st.caption("Answers come only from the manual, with citations to chapter, section, and page.")
+st.caption(
+    "Answers come only from the manual (cited by chapter, section, and page) and, for specific codes, "
+    "the CMS NCCI edit tables (cited by file version and edit)."
+)
 
 CHAPTERS = ["All", "Intro", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII"]
 
@@ -37,8 +40,11 @@ with st.sidebar:
         "- When is modifier 59 appropriate, and what are XE, XS, XP, XU?\n"
         "- What is a Medically Unlikely Edit?\n"
         "- Can an E&M service be reported on the same day as a minor procedure?\n"
-        "- How are add-on codes handled?"
+        "- How are add-on codes handled?\n"
+        "- Can 29880 and 29881 be reported together?  _(edit tables)_\n"
+        "- What is the MUE for 64450?  _(edit tables)_"
     )
+    st.caption("Edit tables loaded: " + ("yes" if Path("data/edits.sqlite").exists() else "no (run `python -m ncci_rag load-edits`)"))
 
 try:
     qa = load_pipeline()
@@ -65,6 +71,10 @@ def render_answer(answer, result=None, debug=False) -> None:
         st.caption("Removed by the claim check:")
         for r in answer.rejected:
             st.markdown(f"- ~~{r.text}~~ — _{r.reason}_")
+    if debug and result is not None and result.facts:
+        st.caption("Edit-table facts (graph lookup) and the manual sections they link to:")
+        for f in result.facts:
+            st.markdown(f"- `{f.chunk.chunk_id}` → {', '.join(f.linked_sections) or '—'}")
     if debug and result is not None:
         st.caption(
             f"Top relevance {result.top_relevance:.3f} (gate {'passed' if result.passed_gate else 'failed'}); "

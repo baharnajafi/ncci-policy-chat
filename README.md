@@ -33,6 +33,13 @@ cp .env.example .env        # then edit OPENAI_API_KEY
 # 3. Build the index: parse -> chunk -> embed (a minute or two; about 650 chunks, a few cents of embeddings)
 PYTHONPATH=src python -m ncci_rag ingest
 
+# 3b. Optional: the CMS edit tables (PTP code pairs, MUE values) for exact code questions.
+#     Download from cms.gov (AMA CPT license click-through; internal use only, never commit them):
+#       Practitioner PTP Edits, files f1-f4:  https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits/medicare-ncci-procedure-procedure-ptp-edits
+#       Practitioner Services MUE Table:      https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits/medicare-ncci-medically-unlikely-edits
+#     Save the zips in data/edits/ (names must contain "ptp" or "mue"), then (a few seconds, 2.6M rows):
+PYTHONPATH=src python -m ncci_rag load-edits
+
 # 4. Ask
 PYTHONPATH=src streamlit run app/streamlit_app.py                    # web UI
 PYTHONPATH=src python -m ncci_rag ask --debug "What is an MUE?"     # CLI, with retrieval scores
@@ -96,6 +103,23 @@ Why code anchoring: during development, "What is the MUE value for CPT 64450?" p
 
 So "not in the manual" has two independent layers: the deterministic gate before the LLM, and the model's own `answerable: false` after reading the passages. The claim check is a third layer for answers that pass both.
 
+### 6. Edit tables as a small knowledge graph (`edits/`)
+The manual says *why* codes are bundled. The quarterly CMS edit files say *which* pairs are edited and *how many* units are allowed. Questions like "can I bill 29880 and 29881 together?" or "what is the MUE for 64450?" need both. `load-edits` loads the practitioner PTP file (2.6M rows, 1.7M active) and the MUE table (15K codes) into `data/edits.sqlite`, and `edits/graph.py` reads them as a property graph:
+
+```
+(Code)-[:PTP_EDIT {effective, deletion, modifier_indicator}]->(Code)
+(PTP_EDIT)-[:BECAUSE]->(Rationale)-[:EXPLAINED_IN]->(Manual section)     e.g. "Mutually exclusive procedures" -> I.P
+(PTP_EDIT.modifier_indicator)-[:EXPLAINED_IN]->(I.E Modifiers and Modifier Indicators)
+(Code)-[:HAS_MUE {value, adjudication, rationale}]-[:EXPLAINED_IN]->(I.V MUEs)
+(Code)-[:IN_RANGE]->(Chapter),  (Section)-[:MENTIONS]->(Code)              already in the manual index
+```
+
+When a question names codes, the retriever looks them up (a pair → its edit, or "no edit in either order"; one code + "bundled" → its one-hop edit summary; "MUE / units" → the MUE row). Each row becomes a **fact**: a short passage labelled `[F1]` that the model sees next to the manual passages `[S1]…`. The fact's linked sections become a fifth ranked list, and at least one of their chunks stays in the final passages, so the answer can cite the table row (what) **and** the manual (why). Facts pass through the same claim check as manual passages. Deleted edits are kept and checked against the date of service (default: the file's effective date).
+
+Example: *"What is the MUE value for CPT 64450?"* Before the graph, the model answered "one", borrowing a value stated for other codes. Now: *"The MUE value for CPT code 64450 is 10 units of service. [1] … only one unit of service of CPT code 64450 may be reported per patient encounter … [2]"*, citing `[1] Medicare NCCI MUE table (practitioner services, effective 2026-10-01), MUE 64450` and `[2] Chapter VIII, Section H, p. VIII-18`.
+
+Why SQLite tables and not a graph database: every traversal here is one or two hops on an exact key, which an indexed query answers in under a millisecond. See `docs/DESIGN.md` for when Neo4j would pay off, and why GraphRAG-style community summaries do not fit this corpus.
+
 ### Storage
 Everything is one SQLite file: chunk metadata, an FTS5 table, vectors stored as float32 BLOBs, and the code tables. At 649 vectors, exact numpy search is about 1 ms and has no recall loss, so an ANN index (HNSW) would add complexity for no gain. `docs/DESIGN.md` covers what changes at scale.
 
@@ -106,7 +130,8 @@ Everything is one SQLite file: chunk metadata, an FTS5 table, vectors stored as 
 `eval/questions.jsonl` holds three kinds of questions:
 - **20 positives**, each labelled with the section(s) that answer it.
 - **4 negatives** that are clearly out of scope (Part B premium, a portal password, the Part D formulary, MRI prices). They calibrate the gate.
-- **7 hard negatives** that look like coding questions but need data the manual does not contain: an MUE value for a specific code, a PTP code pair and its modifier indicator, a fee schedule amount, an OPPS rate, ICD-10 codes, Medicaid policy. Retrieval finds related policy for these, so the gate lets most of them through. Each has `expect_abstain` or `must_not_match` regexes for the value that would be invented.
+- **6 fact questions** that need the edit tables: an MUE value, a PTP pair with an edit, a pair with no edit, a deleted edit, a code's edit summary. Each names the fact that must be looked up, and regexes the answer must and must not match.
+- **4 hard negatives** that look like coding questions but that neither source answers: a fee schedule amount, an OPPS rate, ICD-10 codes, Medicaid policy. Retrieval finds related policy for these, so the gate lets most of them through. Each has `expect_abstain` or `must_not_match` regexes for the value that would be invented.
 
 The eval reports:
 - **hit@1 / hit@3 / hit@6 and MRR** for the final ranking.
@@ -114,7 +139,7 @@ The eval reports:
 - **Gate calibration:** a threshold sweep over positives and negatives, with hard negatives reported separately (no retrieval threshold can separate them).
 - With `--answers`: whether each positive cites an expected section, whether each hard negative stayed clean, and every sentence the claim check removed, with the reason.
 
-Current results (`eval/RESULTS.md` is a copy of the generated report): hit@1 19/20, MRR 0.96; positives citing an expected section 20/20; hard negatives clean 6/7. The one failure (Medicaid DME) is a distortion with no code in it, which a lexical check cannot see. See `docs/DESIGN.md`.
+Current results (`eval/RESULTS.md` is a copy of the generated report): hit@1 19/20, MRR 0.96; positives citing an expected section 20/20; fact questions correct 6/6 (all cite the table row); hard negatives clean 3/4. The one failure (Medicaid DME) is a distortion with no code in it, which a lexical check cannot see. See `docs/DESIGN.md`. Two bugs the eval found while building this: the 64450 misattribution (claim check), and a code regex that missed vaccine-administration and MAAA codes such as `0001A` and `0002M`.
 
 ---
 
@@ -132,6 +157,8 @@ src/ncci_rag/
   index/store.py         SQLite: FTS5, vectors, code index; atomic build
   retrieval/hybrid.py    BM25 + dense + codes -> RRF -> rerank -> gate
   retrieval/rerank.py    cross-encoder reranker
+  edits/loader.py        CMS PTP/MUE zip files -> data/edits.sqlite
+  edits/graph.py         edit tables as a property graph; facts + links to manual sections
   generation/answer.py   structured-output prompt and citation validation
   pipeline.py            build_index() and QAPipeline.ask()
   __main__.py            CLI: ingest | ask | chat
@@ -143,5 +170,6 @@ docs/DESIGN.md           decisions, trade-offs, what I'd build next
 
 ## Scope and limits
 - **Single-turn questions.** Each question is answered on its own. Follow-ups that depend on the previous answer ("what about for 59?") need query rewriting with chat history. This is the first item in `docs/DESIGN.md`.
-- **Policy text, not the edit tables.** The manual explains the rules; the actual PTP and MUE edit pairs are separate CMS data files. Joining them is the main next step (see DESIGN.md).
+- **Practitioner edits only.** The hospital outpatient (OPPS) PTP file, the DME MUE table, and add-on code edits are not loaded yet; the loader handles them the same way. Without `data/edits.sqlite`, the app answers from the manual alone.
+- **Date of service.** Edit lookups use the file's effective date; the question's own date is not parsed yet.
 - This is a reference tool, not billing advice for a specific claim.

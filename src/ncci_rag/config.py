@@ -28,6 +28,10 @@ class Settings:
     pdf_path: Path = field(default_factory=lambda: Path(_env("NCCI_PDF", "data/2026_ncci_medicare_policy_manual_all-chapters.pdf")))
     db_path: Path = field(default_factory=lambda: Path(_env("NCCI_DB", "data/index.sqlite")))
     cache_path: Path = field(default_factory=lambda: Path(_env("NCCI_EMBED_CACHE", "data/embedding_cache.sqlite")))
+    # CMS edit files (PTP pairs, MUE values): zips in edits_dir, loaded into edits_db.
+    # Optional: without edits_db the app answers from the manual alone.
+    edits_dir: Path = field(default_factory=lambda: Path(_env("NCCI_EDITS_DIR", "data/edits")))
+    edits_db: Path = field(default_factory=lambda: Path(_env("NCCI_EDITS_DB", "data/edits.sqlite")))
 
     # Models (OpenAI by default; Azure OpenAI if AZURE_OPENAI_ENDPOINT is set)
     embed_model: str = field(default_factory=lambda: _env("NCCI_EMBED_MODEL", "text-embedding-3-large"))

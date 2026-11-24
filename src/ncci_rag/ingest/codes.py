@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import re
 
-# CPT Category I: 5 digits. Category II/III and PLA: 4 digits + F/T/U. HCPCS Level II: letter + 4 digits.
-_CODE = r"(?:\d{5}|\d{4}[FTU]|[A-V]\d{4})"
+# CPT Category I: 5 digits. Category II/III, PLA, vaccine administration and MAAA:
+# 4 digits + F/T/U/A/M (e.g. 0042T, 0001U, 0001A, 0002M). HCPCS Level II: letter + 4 digits.
+_CODE = r"(?:\d{5}|\d{4}[AFMTU]|[A-V]\d{4})"
 CODE_RE = re.compile(rf"(?<![\w./-]){_CODE}(?![\w/])")
 RANGE_RE = re.compile(rf"(?<![\w./-])({_CODE})\s*[-–]\s*({_CODE})(?![\w/])")
 
