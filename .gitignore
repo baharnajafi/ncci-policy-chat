@@ -9,3 +9,4 @@ data/*.building
 *.egg-info/
 eval/report.md
 .DS_Store
+.claude/
