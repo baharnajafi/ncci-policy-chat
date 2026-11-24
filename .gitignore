@@ -11,3 +11,6 @@ eval/report.md
 .DS_Store
 .claude/
 data/edits/
+.coverage
+.ruff_cache/
+htmlcov/

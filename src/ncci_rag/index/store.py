@@ -40,10 +40,11 @@ CREATE INDEX code_mentions_code ON code_mentions(code);
 CREATE TABLE code_ranges (start TEXT, end TEXT, rowid INTEGER);
 """
 
-STOPWORDS = set(
-    "a an and are as at be by can do does for from how i if in is it its may of on or "
-    "should that the their this to was what when where which who why will with you your".split()
-)
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does", "for", "from", "how", "i", "if",
+    "in", "is", "it", "its", "may", "of", "on", "or", "should", "that", "the", "their", "this", "to", "was",
+    "what", "when", "where", "which", "who", "why", "will", "with", "you", "your",
+}
 
 
 def fts_query(text: str) -> str:
@@ -63,7 +64,7 @@ class IndexStore:
 
     # ------------------------------------------------------------------ build
     @classmethod
-    def build(cls, path: Path, chunks: list[Chunk], vectors: np.ndarray, meta: dict) -> "IndexStore":
+    def build(cls, path: Path, chunks: list[Chunk], vectors: np.ndarray, meta: dict) -> IndexStore:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".building")
@@ -71,7 +72,7 @@ class IndexStore:
         conn = sqlite3.connect(tmp)
         conn.executescript(SCHEMA)
         with conn:
-            for rowid, (c, v) in enumerate(zip(chunks, vectors), start=1):
+            for rowid, (c, v) in enumerate(zip(chunks, vectors, strict=True), start=1):
                 conn.execute(
                     "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (rowid, c.chunk_id, c.chapter_id, c.chapter_title, c.code_range, c.section_id,
@@ -91,6 +92,9 @@ class IndexStore:
         conn.close()
         tmp.replace(path)  # atomic swap: a failed build never leaves a half-written index
         return cls(path)
+
+    def close(self) -> None:
+        self.conn.close()
 
     # ------------------------------------------------------------------ read
     def meta(self) -> dict:

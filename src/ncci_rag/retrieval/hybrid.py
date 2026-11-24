@@ -105,7 +105,7 @@ class HybridRetriever:
             scores = self.reranker.score(
                 question, [f"{c.chunk.context_header}\n{c.chunk.text}" for c in candidates]
             )
-            for rrf_rank, (c, sc) in enumerate(zip(candidates, scores), start=1):
+            for rrf_rank, (c, sc) in enumerate(zip(candidates, scores, strict=True), start=1):
                 c.ranks["rrf"] = rrf_rank
                 c.score = sc
             candidates.sort(key=lambda c: -c.score)

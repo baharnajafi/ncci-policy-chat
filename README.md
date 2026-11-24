@@ -49,7 +49,20 @@ If the CMS link has moved, download the PDF from the [CMS NCCI Medicare page](ht
 
 To run without the reranker (no PyTorch download), set `NCCI_RERANKER=none`. To use Azure OpenAI, set `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`; the model settings then name your deployments.
 
-**Tests** run offline, with no key: `pytest -q`
+**Tests** run offline, with no key, network, or model download: `pip install -e ".[dev]" && pytest -q` (46 tests, about 10 seconds; 97% line coverage with the PDF present, 86% without). Lint: `ruff check src app eval tests`. CI (`.github/workflows/ci.yml`) runs both on every push, on Python 3.10 and 3.12.
+
+| Test file | What it pins down |
+|---|---|
+| `test_codes.py`, `test_chunking.py`, `test_models.py` | code/range/modifier extraction, chapter routing, section-aware chunks, citation text |
+| `test_store.py` | FTS5 keyword search, vector and chapter filters, code index with ranges, atomic build |
+| `test_retrieval.py` | `HybridRetriever.retrieve`: RRF and weights, code routing, reranker order and gate, graph facts passing the gate, the linked section kept in top-k |
+| `test_claim_check.py` | invented source IDs, quotes not in the cited source, codes not anchored in the quoted paragraph (the 64450 case) |
+| `test_edits.py` | PTP/MUE loader on synthetic CMS-format files, active vs deleted edits by date, facts labelled F |
+| `test_pipeline.py` | end to end with a fake chat client: off-topic questions never call the LLM; invented claims are removed; facts reach the prompt; wrong or missing index fails loudly |
+| `test_embedder_and_cli.py` | embedding cache across restarts and models, retry on 429/5xx but not 4xx, OpenAI/Azure switch, CLI |
+| `test_parser.py` | the parser on the real PDF (skipped if absent), and that each PTP rationale links to the right manual section |
+
+The fakes live in `tests/conftest.py`. The embedder hashes words into a vector, the reranker scores word overlap (0-1), and the chat client returns structured JSON built by each test. They are small, but they behave like the real models in the ways the code depends on.
 
 **Evaluation:** `PYTHONPATH=src python eval/run_eval.py` (add `--answers` to grade generated answers too). It writes `eval/report.md`.
 
@@ -164,7 +177,8 @@ src/ncci_rag/
   __main__.py            CLI: ingest | ask | chat
 app/streamlit_app.py     chat UI: citations expand to the exact passage; debug view
 eval/                    labelled questions, eval script
-tests/                   offline unit tests (fake embedder, no key)
+tests/                   offline tests, one file per module; fakes in conftest.py
+.github/workflows/ci.yml lint + tests + coverage on every push
 docs/DESIGN.md           decisions, trade-offs, what I'd build next
 ```
 

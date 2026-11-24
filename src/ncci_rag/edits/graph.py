@@ -85,6 +85,9 @@ class EditGraph:
         self.ptp_source = f"Medicare NCCI PTP edits (practitioner, {self.version}, effective {_date(self.effective)})"
         self.mue_source = f"Medicare NCCI MUE table (practitioner services, effective {_date(self.mue_effective)})"
 
+    def close(self) -> None:
+        self.conn.close()
+
     # ------------------------------------------------------------------ queries
     def ptp_rows(self, a: str, b: str) -> list[tuple]:
         """Every edit between two codes, in either order, active or deleted."""

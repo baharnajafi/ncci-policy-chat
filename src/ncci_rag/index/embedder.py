@@ -21,6 +21,8 @@ class Embedder(Protocol):
     def embed(self, texts: list[str]) -> np.ndarray:  # (n, dim), L2-normalised float32
         ...
 
+    def close(self) -> None: ...
+
 
 def _normalise(m: np.ndarray) -> np.ndarray:
     m = m.astype(np.float32)
@@ -39,6 +41,10 @@ class OpenAIEmbedder:
             self._cache = sqlite3.connect(cache_path)
             self._cache.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, vec BLOB, dim INTEGER)")
 
+    def close(self) -> None:
+        if self._cache is not None:
+            self._cache.close()
+
     def _key(self, text: str) -> str:
         return hashlib.sha256(f"{self.model}\n{text}".encode()).hexdigest()
 
@@ -52,7 +58,7 @@ class OpenAIEmbedder:
             try:
                 resp = get_client().embeddings.create(model=self.model, input=batch)
                 return [d.embedding for d in resp.data]
-            except (RateLimitError, APIConnectionError) as e:  # transient: back off and retry
+            except (RateLimitError, APIConnectionError):  # transient: back off and retry
                 if attempt == self.max_retries - 1:
                     raise
                 time.sleep(delay)
@@ -80,7 +86,7 @@ class OpenAIEmbedder:
         for start in range(0, len(todo), self.batch_size):
             idx = todo[start : start + self.batch_size]
             embs = self._call([texts[i] for i in idx])
-            for i, e in zip(idx, embs):
+            for i, e in zip(idx, embs, strict=True):
                 v = np.asarray(e, dtype=np.float32)
                 vectors[i] = v
                 if self._cache is not None:

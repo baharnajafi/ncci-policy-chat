@@ -44,6 +44,7 @@ def build_index(settings: Settings | None = None, log=print) -> IndexStore:
         "n_chunks": len(chunks),
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    embedder.close()
     store = IndexStore.build(s.db_path, chunks, vectors, meta)
     log(f"Index written to {s.db_path}")
     return store
@@ -57,6 +58,7 @@ class QAPipeline:
         self.store = IndexStore(self.settings.db_path)
         meta = self.store.meta()
         if meta.get("embed_model") != self.settings.embed_model:
+            self.store.close()
             raise RuntimeError(
                 f"Index was built with {meta.get('embed_model')} but NCCI_EMBED_MODEL is "
                 f"{self.settings.embed_model}. Query and passage vectors must come from the same model; re-run ingest."
@@ -65,6 +67,11 @@ class QAPipeline:
         # The CMS edit tables are optional: without them, answers come from the manual alone.
         self.edits = EditGraph(self.settings.edits_db) if self.settings.edits_db.exists() else None
         self.retriever = HybridRetriever(self.store, self.embedder, self.settings, self.edits)
+
+    def close(self) -> None:
+        for part in (self.store, self.edits, self.embedder):
+            if part is not None and hasattr(part, "close"):
+                part.close()
 
     def retrieve(self, question: str, chapter: str | None = None) -> RetrievalResult:
         return self.retriever.retrieve(question, chapter)
