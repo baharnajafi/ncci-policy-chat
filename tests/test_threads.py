@@ -38,3 +38,27 @@ def test_embedding_cache_from_another_thread(tmp_path, monkeypatch):
         vecs = list(pool.map(lambda t: e.embed([t]), ["first question", "second", "third", "second"] * 5))
     assert len(vecs) == 20 and all(v.shape == (1, 2) for v in vecs)
     e.close()
+
+
+def test_cold_store_loaded_by_many_threads_at_once(store):
+    """Regression test for a race seen in CI (Python 3.12): lazy loading published an
+    empty dict before filling it, so a second thread could look up a chunk too early
+    (KeyError). A barrier releases all threads together against a freshly opened store."""
+    import threading
+
+    from ncci_rag.index.store import IndexStore
+
+    for _ in range(20):
+        cold = IndexStore(store.path)
+        barrier = threading.Barrier(16)
+
+        def read(_, cold=cold, barrier=barrier):
+            barrier.wait()
+            rowids, matrix = cold._vectors()
+            chunks = cold.chunks()
+            return len(chunks), len(rowids), matrix.shape[0], all(int(r) in chunks for r in rowids)
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = set(pool.map(read, range(16)))
+        cold.close()
+        assert results == {(7, 7, 7, True)}

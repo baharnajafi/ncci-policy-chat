@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -62,6 +63,10 @@ class IndexStore:
         self._matrix: np.ndarray | None = None
         self._rowids: np.ndarray | None = None
         self._chunks: dict[int, Chunk] | None = None
+        # Chunks and vectors are loaded lazily, once, and shared by Streamlit's threads.
+        # Each is built in a local variable and published in one assignment under this
+        # lock, so no thread ever sees a half-filled dict or a matrix without its rowids.
+        self._init_lock = threading.Lock()
 
     # ------------------------------------------------------------------ build
     @classmethod
@@ -103,19 +108,29 @@ class IndexStore:
 
     def chunks(self) -> dict[int, Chunk]:
         if self._chunks is None:
-            self._chunks = {}
-            for row in self.conn.execute("SELECT * FROM chunks"):
-                (rowid, chunk_id, chapter_id, chapter_title, code_range, section_id, section_title,
-                 page_start, page_end, label_start, label_end, text, codes, modifiers) = row
-                self._chunks[rowid] = Chunk(chunk_id, chapter_id, chapter_title, code_range, section_id,
-                                            section_title, page_start, page_end, label_start, label_end,
-                                            text, json.loads(codes), json.loads(modifiers))
+            with self._init_lock:
+                if self._chunks is None:
+                    chunks = {}
+                    for row in self.conn.execute("SELECT * FROM chunks"):
+                        (rowid, chunk_id, chapter_id, chapter_title, code_range, section_id, section_title,
+                         page_start, page_end, label_start, label_end, text, codes, modifiers) = row
+                        chunks[rowid] = Chunk(chunk_id, chapter_id, chapter_title, code_range, section_id,
+                                              section_title, page_start, page_end, label_start, label_end,
+                                              text, json.loads(codes), json.loads(modifiers))
+                    self._chunks = chunks
         return self._chunks
 
-    def _load_vectors(self) -> None:
-        rows = self.conn.execute("SELECT rowid, vec FROM vectors ORDER BY rowid").fetchall()
-        self._rowids = np.array([r[0] for r in rows])
-        self._matrix = np.vstack([np.frombuffer(r[1], dtype=np.float32) for r in rows])
+    def _vectors(self) -> tuple[np.ndarray, np.ndarray]:
+        """(rowids, matrix), loaded once."""
+        if self._matrix is None:
+            with self._init_lock:
+                if self._matrix is None:
+                    rows = self.conn.execute("SELECT rowid, vec FROM vectors ORDER BY rowid")
+                    rowids = np.array([r[0] for r in rows])
+                    matrix = np.vstack([np.frombuffer(r[1], dtype=np.float32) for r in rows])
+                    self._rowids = rowids
+                    self._matrix = matrix  # assigned last: callers test _matrix
+        return self._rowids, self._matrix
 
     def chapter_ranges(self) -> dict[str, tuple[str, str]]:
         """Chapter -> (first code, last code), from titles like "CPT Codes 20000 - 29999"."""
@@ -143,14 +158,13 @@ class IndexStore:
         return [r[0] for r in self.conn.execute(sql, params)]
 
     def vector_search(self, query_vec: np.ndarray, k: int, chapter: str | None = None) -> list[tuple[int, float]]:
-        if self._matrix is None:
-            self._load_vectors()
-        sims = self._matrix @ query_vec.astype(np.float32)
+        rowids, matrix = self._vectors()
+        sims = matrix @ query_vec.astype(np.float32)
         order = np.argsort(-sims)
         chunks = self.chunks() if chapter else None
         out = []
         for i in order:
-            rowid = int(self._rowids[i])
+            rowid = int(rowids[i])
             if chapter and chunks[rowid].chapter_id != chapter:
                 continue
             out.append((rowid, float(sims[i])))
@@ -161,15 +175,14 @@ class IndexStore:
     def section_search(self, query_vec: np.ndarray, sections: set[str], k: int) -> list[int]:
         """Chunks of the given sections ("I.P"), most similar to the query first. Used for
         graph expansion: an edit's rationale points to the section that explains it."""
-        if self._matrix is None:
-            self._load_vectors()
+        rowids, matrix = self._vectors()
         chunks = self.chunks()
-        order = np.argsort(-(self._matrix @ query_vec.astype(np.float32)))
+        order = np.argsort(-(matrix @ query_vec.astype(np.float32)))
         out = []
         for i in order:
-            c = chunks[int(self._rowids[i])]
+            c = chunks[int(rowids[i])]
             if f"{c.chapter_id}.{c.section_id}" in sections:
-                out.append(int(self._rowids[i]))
+                out.append(int(rowids[i]))
                 if len(out) == k:
                     break
         return out

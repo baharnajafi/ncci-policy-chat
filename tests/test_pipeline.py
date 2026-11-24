@@ -116,5 +116,5 @@ def test_build_index_without_pdf_says_where_to_get_it(tmp_path, settings):
 
 
 def test_vectors_are_unit_length(store):
-    store._load_vectors()
-    assert np.allclose(np.linalg.norm(store._matrix, axis=1), 1.0, atol=1e-5)
+    _, matrix = store._vectors()
+    assert np.allclose(np.linalg.norm(matrix, axis=1), 1.0, atol=1e-5)

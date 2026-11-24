@@ -71,7 +71,7 @@ Linux installs the CUDA build (several GB), which a CPU container cannot use.
 
 Before writing this page, the app was started the way the platform starts it: a clean copy
 of the repo, a fresh environment from `requirements.txt`, secrets only in
-`.streamlit/secrets.toml`, no `.env`, PDF, or index. That run found three problems, now fixed
+`.streamlit/secrets.toml`, no `.env`, PDF, or index. That run (and the first CI run) found four problems, now fixed
 and covered by tests:
 
 1. **Second question failed** with "SQLite objects created in a thread can only be used in
@@ -82,7 +82,12 @@ and covered by tests:
    `NCCI_MIN_RELEVANCE`, ...), because they were read when `config.py` was imported, before
    the secrets were applied. They are now read when `Settings()` is created
    (`tests/test_config.py`).
-3. **A question sent while another was running lost its answer** (Streamlit stops the
+3. **Two threads loading a cold index at once** (found by the first CI run, on Python 3.12):
+   lazy loading published an empty dict before filling it, so another thread could look up
+   a chunk too early. Chunks and vectors are now built locally and published in one
+   assignment under a lock; `test_cold_store_loaded_by_many_threads_at_once` fails on the old
+   code every time.
+4. **A question sent while another was running lost its answer** (Streamlit stops the
    running script when new input arrives). The chat now marks such a question as
    interrupted instead of leaving it without a reply.
 
