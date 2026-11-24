@@ -84,13 +84,17 @@ The lists are fused with **Reciprocal Rank Fusion** (k = 60). The retrievers' sc
 ### 4. Rerank, then a relevance gate
 The top 30 fused candidates are rescored by a cross-encoder (`BAAI/bge-reranker-base`), which reads the question and the passage together. This gives the final order, and it also gives a score that is *comparable across questions*. RRF scores cannot serve this purpose: they only say how a passage ranked, not whether it is relevant. If the best reranker score is below `NCCI_MIN_RELEVANCE`, the app answers "not in the manual" **without calling the LLM**. The threshold is calibrated by `eval/run_eval.py`; see below.
 
-### 5. Grounded generation with validated citations (`generation/answer.py`)
-The model sees the top 6 passages labelled `[S1]…[S6]`. It must return strict JSON (OpenAI structured outputs): `answerable`, plus a list of `{sentence, source_ids}`. The code then validates the response:
-- Source IDs that were not provided are dropped. A sentence left with no valid source is removed.
-- If no sentence survives, the answer becomes "not in the manual".
+### 5. Grounded generation with a claim check (`generation/answer.py`)
+The model sees the top 6 passages labelled `[S1]…[S6]`. It must return strict JSON (OpenAI structured outputs): `answerable`, an optional `not_covered` note, and a list of sentences. Each sentence carries **verbatim quotes** from the passages, the source IDs, and then the sentence itself (quotes come first in the schema, so the sentence is written from the evidence). The code then checks every sentence before showing it:
+- **Source check:** source IDs that were not provided are dropped; a sentence with no valid source is removed.
+- **Quote check:** each quote must appear (after whitespace and punctuation normalisation) in a passage the sentence cites.
+- **Code anchoring:** every CPT/HCPCS code the sentence names must appear, literally or inside a stated range, in its quotes or in the source paragraph each quote comes from.
+- If no sentence survives, the answer becomes "not in the manual". Removed sentences are kept on the answer and shown in the UI's debug view.
 - Citations are built **from the stored metadata** (chapter, section, page labels), never from text the model wrote.
 
-So "not in the manual" has two independent layers: the deterministic gate before the LLM, and the model's own `answerable: false` after reading the passages.
+Why code anchoring: during development, "What is the MUE value for CPT 64450?" produced *"The MUE value for CPT 64450 is one"*, citing the right chunk. But the source sentence, *"The MUEs for these codes are one"*, is about trichiasis codes 67820-67835 in the previous list item. The citation was valid and the claim was wrong. A chunk-level citation check cannot catch this; a paragraph-scoped code check does.
+
+So "not in the manual" has two independent layers: the deterministic gate before the LLM, and the model's own `answerable: false` after reading the passages. The claim check is a third layer for answers that pass both.
 
 ### Storage
 Everything is one SQLite file: chunk metadata, an FTS5 table, vectors stored as float32 BLOBs, and the code tables. At 649 vectors, exact numpy search is about 1 ms and has no recall loss, so an ANN index (HNSW) would add complexity for no gain. `docs/DESIGN.md` covers what changes at scale.
@@ -99,13 +103,18 @@ Everything is one SQLite file: chunk metadata, an FTS5 table, vectors stored as 
 
 ## Evaluation
 
-`eval/questions.jsonl` holds 20 policy questions, each labelled with the section(s) that answer it, and 4 out-of-scope questions (Part B premium, a portal password, the Part D formulary, MRI prices). The eval reports:
+`eval/questions.jsonl` holds three kinds of questions:
+- **20 positives**, each labelled with the section(s) that answer it.
+- **4 negatives** that are clearly out of scope (Part B premium, a portal password, the Part D formulary, MRI prices). They calibrate the gate.
+- **7 hard negatives** that look like coding questions but need data the manual does not contain: an MUE value for a specific code, a PTP code pair and its modifier indicator, a fee schedule amount, an OPPS rate, ICD-10 codes, Medicaid policy. Retrieval finds related policy for these, so the gate lets most of them through. Each has `expect_abstain` or `must_not_match` regexes for the value that would be invented.
 
+The eval reports:
 - **hit@1 / hit@3 / hit@6 and MRR** for the final ranking.
 - **The rank each retriever alone** gave the first relevant chunk, which shows what BM25, dense, and the code index each contribute.
-- **Gate calibration:** the top relevance score for every question, and a threshold sweep. The chosen threshold should pass every in-scope question and block every out-of-scope one.
+- **Gate calibration:** a threshold sweep over positives and negatives, with hard negatives reported separately (no retrieval threshold can separate them).
+- With `--answers`: whether each positive cites an expected section, whether each hard negative stayed clean, and every sentence the claim check removed, with the reason.
 
-Results for the committed configuration are in [`eval/RESULTS.md`](eval/RESULTS.md), which is a copy of the generated report.
+Current results (`eval/RESULTS.md` is a copy of the generated report): hit@1 19/20, MRR 0.96; positives citing an expected section 20/20; hard negatives clean 6/7. The one failure (Medicaid DME) is a distortion with no code in it, which a lexical check cannot see. See `docs/DESIGN.md`.
 
 ---
 

@@ -49,9 +49,41 @@ except Exception as e:  # missing index or key: show how to fix it
 if "history" not in st.session_state:
     st.session_state.history = []
 
+
+def render_answer(answer, result=None, debug=False) -> None:
+    """Answer text, then one expander per citation with the quotes that support it
+    and the full passage. Kept in history so citations survive Streamlit reruns."""
+    st.markdown(answer.text)
+    for i, c in enumerate(answer.citations, start=1):
+        quotes = [q for s in answer.sentences if c.source_id in s.source_ids for q in s.quotes]
+        with st.expander(f"[{i}] {c.chunk.heading}, {c.chunk.pages}"):
+            for q in dict.fromkeys(quotes):
+                st.markdown(f"> {q}")
+            st.caption("Full passage")
+            st.write(c.chunk.text)
+    if debug and answer.rejected:
+        st.caption("Removed by the claim check:")
+        for r in answer.rejected:
+            st.markdown(f"- ~~{r.text}~~ — _{r.reason}_")
+    if debug and result is not None:
+        st.caption(
+            f"Top relevance {result.top_relevance:.3f} (gate {'passed' if result.passed_gate else 'failed'}); "
+            f"codes {result.query_codes}, modifiers {result.query_modifiers}, routed chapter {result.routed_chapter}"
+        )
+        st.table(
+            [
+                {"score": round(p.score, 3), "chunk": p.chunk.chunk_id, "pages": p.chunk.pages, "ranks": str(p.ranks)}
+                for p in result.passages
+            ]
+        )
+
+
 for turn in st.session_state.history:
     with st.chat_message(turn["role"]):
-        st.markdown(turn["content"])
+        if turn["role"] == "user":
+            st.markdown(turn["content"])
+        else:
+            render_answer(turn["answer"], turn.get("result"), debug)
 
 question = st.chat_input("Ask about NCCI coding policy...")
 if question:
@@ -62,19 +94,5 @@ if question:
     with st.chat_message("assistant"):
         with st.spinner("Searching the manual..."):
             answer, result = qa.ask(question, None if chapter == "All" else chapter)
-        st.markdown(answer.text)
-        for i, c in enumerate(answer.citations, start=1):
-            with st.expander(f"[{i}] {c.chunk.heading}, {c.chunk.pages}"):
-                st.write(c.chunk.text)
-        if debug:
-            st.caption(
-                f"Top relevance {result.top_relevance:.3f} (gate {'passed' if result.passed_gate else 'failed'}); "
-                f"codes {result.query_codes}, modifiers {result.query_modifiers}, routed chapter {result.routed_chapter}"
-            )
-            st.table(
-                [
-                    {"score": round(p.score, 3), "chunk": p.chunk.chunk_id, "pages": p.chunk.pages, "ranks": str(p.ranks)}
-                    for p in result.passages
-                ]
-            )
-    st.session_state.history.append({"role": "assistant", "content": answer.text})
+        render_answer(answer, result, debug)
+    st.session_state.history.append({"role": "assistant", "answer": answer, "result": result})

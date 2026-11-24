@@ -21,6 +21,10 @@ def _print_answer(answer, result, debug: bool) -> None:
         print("\nSources:")
         for i, c in enumerate(answer.citations, start=1):
             print(f"  [{i}] {c.chunk.heading}, {c.chunk.pages}")
+    if debug and answer.rejected:
+        print("\nRemoved by the claim check:")
+        for r in answer.rejected:
+            print(f"  - {r.text}  ({r.reason})")
     if debug:
         print(f"\nretrieval: top relevance={result.top_relevance:.3f} gate={'pass' if result.passed_gate else 'FAIL'} "
               f"codes={result.query_codes} modifiers={result.query_modifiers} routed_chapter={result.routed_chapter}")

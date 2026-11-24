@@ -16,6 +16,7 @@ Decisions, the alternatives I considered, and what I would build next. The goal 
 | Reranking | Cross-encoder `bge-reranker-base` over the top 30 | LLM-as-reranker; none | It improves the order, and it provides an absolute relevance score for the gate. An LLM reranker costs more and is slower for this. |
 | Abstention | (a) deterministic gate on the top reranker score before the LLM; (b) `answerable=false` from the model | Prompt-only "say I don't know" | Prompt-only abstention is unreliable when the context is plausible but irrelevant. The gate is cheap and calibrated on labelled negatives. It also never sends irrelevant text to the model. |
 | Citations | Per-sentence source IDs in strict JSON; validated in code; rendered from stored metadata | Ask the model to write citations in prose | The model cannot invent a page number, because it never writes one. Unsupported sentences are removed rather than shown. |
+| Claim check | Per-sentence verbatim quotes; quote must be in the cited passage; every named code must be in the quote's source paragraph (or a range there) | Trust chunk-level citations; LLM-as-judge on every sentence | A valid chunk citation does not mean a valid claim (the 64450 / trichiasis case in the README). The lexical checks are deterministic, free, and testable offline. Paragraph scope matches how the manual writes rules (one per paragraph or list item). An entailment judge is the next layer, for claims with no code in them. |
 | Storage | One SQLite file, built atomically (`.building` → rename); meta records the PDF hash and embed model | Postgres + pgvector | No infrastructure for a reviewer to run. The meta check refuses to query an index built with a different embedding model. |
 | Provider | OpenAI, or Azure OpenAI through one env switch | — | Swapping to Azure is a configuration change, not a code change. |
 | UI | Streamlit, minimal | React | The exercise is about retrieval and grounding. The UI only needs to show answers, expandable citations, and a debug view. |
@@ -25,9 +26,13 @@ Decisions, the alternatives I considered, and what I would build next. The goal 
 
 Every tunable (models, candidate counts, k, threshold) is an environment variable, and the report prints the settings it ran with. A change is then a one-line experiment with a comparable report.
 
-**Known limit of the eval:** 24 questions, written and labelled by one person. It catches regressions and makes the gate calibration concrete, but it is not a statistically strong benchmark. The next step is 100+ questions, drafted from section headings by an LLM and **reviewed by a coding expert**, with a few hard negatives that sound in-domain (for example, Medicaid-specific rules or OPPS payment rates).
+**Known limit of the eval:** 31 questions, written and labelled by one person. It catches regressions and makes the gate calibration concrete, but it is not a statistically strong benchmark. The next step is 100+ questions, drafted from section headings by an LLM and **reviewed by a coding expert**, with more hard negatives that sound in-domain. The first 7 are already in the set (MUE values, PTP pairs, fee schedule and OPPS rates, ICD-10, Medicaid).
+
+**What the claim check cannot see.** It is lexical. It catches invented quotes and codes borrowed from another rule, but not a distortion with no code in it. The remaining hard-negative failure is an example: the manual says reconsideration requests should name the program (Medicare or Medicaid) and the edit type (for example DME), and the model turned that into a statement about Medicaid DME edits. It also over-rejects a little: a long list of codes the model only partly quoted, or a quote it stitched from two sentences. The trade-off is deliberate, because a coder is better served by a shorter answer than by a confident wrong one.
 
 ## 3. What I would build next
+
+**0. Entailment check per sentence.** Add an NLI model or a small LLM judge that scores each (quote, sentence) pair, run only on sentences that pass the lexical checks. Gate it with the hard-negative set, and report removed sentences as today.
 
 **1. Conversational follow-ups.** Rewrite the question using the chat history before retrieval ("what about with modifier 25?" → a standalone question). The history is used only for retrieval; the answer is still grounded only in retrieved passages.
 

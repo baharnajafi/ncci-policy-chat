@@ -89,6 +89,15 @@ class Citation:
 class AnswerSentence:
     text: str
     source_ids: list[str]
+    quotes: list[str] = field(default_factory=list)  # verbatim support, checked against the cited chunks
+
+
+@dataclass
+class RejectedSentence:
+    """A sentence the model wrote that failed a grounding check and was not shown."""
+
+    text: str
+    reason: str
 
 
 @dataclass
@@ -99,6 +108,8 @@ class Answer:
     citations: list[Citation]  # only sources actually cited, in order of first use
     retrieved: list[ScoredChunk]  # everything the model saw, for transparency
     reason: str = ""  # why there is no answer, when answerable is False
+    rejected: list[RejectedSentence] = field(default_factory=list)  # removed by the claim check
+    not_covered: str = ""  # what part of the question the manual does not address (uncited, shown as a note)
 
     @property
     def text(self) -> str:
@@ -109,4 +120,7 @@ class Answer:
         for s in self.sentences:
             marks = "".join(f"[{order[sid]}]" for sid in s.source_ids if sid in order)
             parts.append(f"{s.text} {marks}".strip())
-        return " ".join(parts)
+        text = " ".join(parts)
+        if self.not_covered:
+            text += f"\n\nNot covered by the manual: {self.not_covered}"
+        return text
