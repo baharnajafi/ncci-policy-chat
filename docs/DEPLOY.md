@@ -90,8 +90,8 @@ On Streamlit Community Cloud the answer usually takes a few seconds longer:
 Levers, each a secret change with no code change (re-run `eval/run_eval.py --answers`
 after any of them):
 
-- `NCCI_RERANK_POOL = "15"` halves the reranker work (eval: all first relevant chunks are
-  within the top 5 after fusion).
+- `NCCI_RERANK_POOL = "15"` halves the reranker work (eval: for all 20 positives the first relevant chunk is
+  at rank 3 or better after fusion, before reranking).
 - `NCCI_CHAT_MODEL = "gpt-4.1-mini"`: faster and cheaper; check the claim-check removals
   and hard-negative results before switching.
 - A paid host (or Hugging Face Spaces with more CPU) removes the shared-CPU penalty.
