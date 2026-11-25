@@ -67,6 +67,35 @@ results in `eval/RESULTS.md` stay comparable.
 **CPU-only PyTorch.** `requirements.txt` adds the PyTorch CPU wheel index. Without it, pip on
 Linux installs the CUDA build (several GB), which a CPU container cannot use.
 
+## Latency: where the time goes
+
+Measured locally per question, with the hosted settings (MiniLM reranker):
+
+| Stage | Time |
+|---|---|
+| Question embedding (OpenAI) | ~0.3-0.8 s (0 s when the same question repeats: cached) |
+| BM25 + vector + code search, RRF, cross-encoder rerank of 30 | ~0.1 s |
+| Answer generation (`gpt-4.1`, structured JSON) | ~2-5 s |
+
+On Streamlit Community Cloud the answer usually takes a few seconds longer:
+
+- **Shared CPU.** The free container has a small CPU share, so the cross-encoder takes
+  noticeably longer there than on a laptop.
+- **First question after a start.** The reranker model is downloaded and loaded, and a
+  sleeping app has to wake up and rebuild its index (about a minute). Open the app once
+  before sending the link.
+- **The LLM call dominates everywhere.** The answer is shown only after it is validated
+  (every sentence's quote and codes are checked), so it cannot be streamed word by word.
+
+Levers, each a secret change with no code change (re-run `eval/run_eval.py --answers`
+after any of them):
+
+- `NCCI_RERANK_POOL = "15"` halves the reranker work (eval: all first relevant chunks are
+  within the top 5 after fusion).
+- `NCCI_CHAT_MODEL = "gpt-4.1-mini"`: faster and cheaper; check the claim-check removals
+  and hard-negative results before switching.
+- A paid host (or Hugging Face Spaces with more CPU) removes the shared-CPU penalty.
+
 ## Things the local tests and a simulated cloud start caught
 
 Before writing this page, the app was started the way the platform starts it: a clean copy
