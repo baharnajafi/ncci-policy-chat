@@ -49,9 +49,12 @@ class Settings:
     top_k: int = field(default_factory=lambda: int(_env("NCCI_TOP_K", "6")))
     rrf_k: int = field(default_factory=lambda: int(_env("NCCI_RRF_K", "60")))
     # Relevance gate: below this, answer "not in the manual" without calling the LLM.
-    # Calibrated with eval/run_eval.py (see README). Reranker scores are 0-1;
+    # Calibrated with eval/run_eval.py on 20 positives and 10 off-topic negatives: no gate
+    # error from 0.10 to 0.70 with bge-reranker-base (0.01 to 0.90 with MiniLM). 0.30 keeps
+    # a wide margin over the highest negative (0.05) without refusing any positive (lowest
+    # 0.78). Scores are not calibrated probabilities. Reranker scores are 0-1;
     # if the reranker is disabled, the gate uses the top dense cosine similarity instead.
-    min_relevance: float = field(default_factory=lambda: float(_env("NCCI_MIN_RELEVANCE", "0.10")))
+    min_relevance: float = field(default_factory=lambda: float(_env("NCCI_MIN_RELEVANCE", "0.30")))
     min_dense_similarity: float = field(default_factory=lambda: float(_env("NCCI_MIN_DENSE_SIM", "0.30")))
 
     # Hosted app: questions allowed per browser session (0 = unlimited), to bound API cost.

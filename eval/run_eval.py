@@ -80,6 +80,43 @@ def fact_correct(item: dict, answer) -> bool:
             and not any(re.search(p, text, re.I) for p in item.get("must_not_match", [])))
 
 
+CALIBRATION_GRID = [0.01, 0.02, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90]
+
+
+def gate_threshold(settings) -> float:
+    """The threshold the gate actually uses: reranker score, or dense cosine without a reranker."""
+    return settings.min_relevance if settings.use_reranker else settings.min_dense_similarity
+
+
+def calibration_table(pos: list[float], neg: list[float], hard: list[float], current: float) -> list[str]:
+    """Error rates of the relevance gate at each threshold.
+
+    * wrong refusal: an in-scope question gets "not in the manual" (positives below t);
+    * wrong pass: an out-of-scope question reaches the LLM (easy negatives at or above t);
+    * hard negatives passed: in-domain questions the manual cannot answer that reach the
+      answer layer. This is expected and is not counted as a gate error: the gate judges
+      topic relevance, and the claim check and `answerable` handle missing facts.
+
+    The scores are not calibrated probabilities (a sigmoid over cross-encoder logits keeps
+    order, not meaning), so the threshold is chosen from these empirical rates."""
+
+    def pct(k: int, n: int) -> str:
+        return f"{k}/{n} ({100 * k / n:.0f}%)" if n else "-"
+
+    out = ["", f"Current threshold: **{current}** (row in bold).", "",
+           "| threshold | wrong refusals (positives blocked) | wrong passes (negatives reaching the LLM) | hard negatives passed to the answer layer |",
+           "|---|---|---|---|"]
+    for t in sorted(set(CALIBRATION_GRID) | {current}):
+        row = (f"| {t:.2f} | {pct(sum(s < t for s in pos), len(pos))} | {pct(sum(s >= t for s in neg), len(neg))} "
+               f"| {pct(sum(s >= t for s in hard), len(hard))} |")
+        out.append(row.replace(f"| {t:.2f} |", f"| **{t:.2f}** |", 1) if t == current else row)
+    safe = [t for t in CALIBRATION_GRID if all(s >= t for s in pos) and all(s < t for s in neg)]
+    if safe:
+        out += ["", f"Thresholds with no gate error on this set: {safe[0]:.2f} to {safe[-1]:.2f}. A low value in that "
+                "range favours answering (a wrong 'not found' is costly for a coder); later layers catch weak answers."]
+    return out
+
+
 def md(text: str) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ")
 
@@ -178,13 +215,12 @@ def main() -> int:
         else:
             lines.append("Not separable on this set: choose the threshold by the cost of each error "
                          "(a wrong 'not found' vs. an answer built on irrelevant text).")
-        lines += ["", "| threshold | positives passed | negatives blocked |", "|---|---|---|"]
-        for t in sorted({round(x, 2) for x in pos + neg}):
-            lines.append(f"| {t:.2f} | {sum(s >= t for s in pos)}/{n_pos} | {sum(s < t for s in neg)}/{len(neg)} |")
+        lines += calibration_table(pos, neg, hard, gate_threshold(settings))
     if hard:
-        passed = sum(s >= settings.min_relevance for s in hard)
-        lines += ["", f"Hard negatives passing the gate at {settings.min_relevance}: **{passed}/{len(hard)}** "
-                  f"(top scores {', '.join(f'{s:.2f}' for s in hard)}). These are in-domain, so retrieval "
+        t = gate_threshold(settings)
+        passed = sum(s >= t for s in hard)
+        lines += ["", f"Hard negatives passing the gate at {t}: **{passed}/{len(hard)}** "
+                  f"(top scores {', '.join(f'{s:.2f}' for s in sorted(hard))}). These are in-domain, so retrieval "
                   "correctly finds related policy; the answer layer must handle them."]
 
     fact_rows = [r for r in rows if r["kind"] == "fact"]

@@ -144,17 +144,17 @@ Everything is one SQLite file: chunk metadata, an FTS5 table, vectors stored as 
 
 `eval/questions.jsonl` holds three kinds of questions:
 - **20 positives**, each labelled with the section(s) that answer it.
-- **4 negatives** that are clearly out of scope (Part B premium, a portal password, the Part D formulary, MRI prices). They calibrate the gate.
+- **10 negatives** that are clearly out of scope: some unrelated (taxes, hospital ratings, diabetes symptoms), some using Medicare vocabulary (Part B premium, open enrollment, Part D copays). They calibrate the gate.
 - **6 fact questions** that need the edit tables: an MUE value, a PTP pair with an edit, a pair with no edit, a deleted edit, a code's edit summary. Each names the fact that must be looked up, and regexes the answer must and must not match.
-- **4 hard negatives** that look like coding questions but that neither source answers: a fee schedule amount, an OPPS rate, ICD-10 codes, Medicaid policy. Retrieval finds related policy for these, so the gate lets most of them through. Each has `expect_abstain` or `must_not_match` regexes for the value that would be invented.
+- **12 hard negatives** that look like coding questions, but whose answer lives in another CMS source: RVUs, the anesthesia conversion factor, fee schedule payments, OPPS rates, ICD-10 codes, LCD coverage, Medicare Advantage prior authorization, timely filing, a code's global period (the manual explains global periods but never names 27447), Medicaid policy. Each has `expect_abstain` or `must_not_match` regexes for the value that would be invented.
 
 The eval reports:
 - **hit@1 / hit@3 / hit@6 and MRR** for the final ranking.
 - **The rank each retriever alone** gave the first relevant chunk, which shows what BM25, dense, and the code index each contribute.
-- **Gate calibration:** a threshold sweep over positives and negatives, with hard negatives reported separately (no retrieval threshold can separate them).
+- **Gate calibration:** for each threshold, the rate of wrong refusals (positives blocked), wrong passes (negatives reaching the LLM), and hard negatives passed to the answer layer. With `bge-reranker-base` there is no gate error from 0.10 to 0.70 (lowest positive 0.78, highest negative 0.05), so the default is **0.30**: the same behaviour as 0.10 on every question here, with six times the margin over the off-topic questions. The scores are not calibrated probabilities; the threshold comes from these error rates.
 - With `--answers`: whether each positive cites an expected section, whether each hard negative stayed clean, and every sentence the claim check removed, with the reason.
 
-Current results (`eval/RESULTS.md` is a copy of the generated report): hit@1 19/20, MRR 0.96; positives citing an expected section 20/20; fact questions correct 6/6 (all cite the table row); hard negatives clean 3/4. The one failure (Medicaid DME) is a distortion with no code in it, which a lexical check cannot see. See `docs/DESIGN.md`. Two bugs the eval found while building this: the 64450 misattribution (claim check), and a code regex that missed vaccine-administration and MAAA codes such as `0001A` and `0002M`.
+Current results (`eval/RESULTS.md` is a copy of the generated report): hit@1 19/20, MRR 0.96; positives citing an expected section 20/20; fact questions correct 6/6 (all cite the table row); off-topic negatives blocked 10/10; hard negatives clean 11/12. The one failure (Medicaid DME) is a distortion with no code in it, which a lexical check cannot see. See `docs/DESIGN.md`. Two bugs the eval found while building this: the 64450 misattribution (claim check), and a code regex that missed vaccine-administration and MAAA codes such as `0001A` and `0002M`.
 
 ---
 

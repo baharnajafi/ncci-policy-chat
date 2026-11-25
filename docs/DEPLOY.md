@@ -31,7 +31,7 @@ Nothing secret or licensed is in the repository. The hosted app starts from the 
    APP_PASSWORD = "choose-a-password"     # share it with the reviewers
    NCCI_MAX_QUESTIONS = "25"               # per browser session
    NCCI_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-   NCCI_MIN_RELEVANCE = "0.10"
+   NCCI_MIN_RELEVANCE = "0.30"
    ```
 
 4. Deploy. The first start installs dependencies (a few minutes, CPU-only PyTorch), then the
@@ -55,10 +55,10 @@ Measured on this machine, same 30 candidates:
 
 | Reranker | Peak memory (incl. PyTorch) | Load + score 30 pairs | Eval: hit@1 / hit@3 / MRR | Gate margin (lowest positive vs highest negative) |
 |---|---|---|---|---|
-| `BAAI/bge-reranker-base` (local default) | ~1150 MB | 2.5 s | 19/20 · 19/20 · 0.96 | 0.78 vs 0.03 |
-| `cross-encoder/ms-marco-MiniLM-L-6-v2` (hosted) | ~650 MB | 1.3 s | 19/20 · 20/20 · 0.97 | 0.96 vs 0.001 |
+| `BAAI/bge-reranker-base` (local default) | ~1150 MB | 2.5 s | 19/20 · 19/20 · 0.96 | 0.78 vs 0.05 |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` (hosted) | ~650 MB | 1.3 s | 19/20 · 20/20 · 0.97 | 0.96 vs 0.004 |
 
-On this eval set the small model is as good or better, and the same gate threshold (0.10)
+On this eval set the small model is as good or better, and the same gate threshold (0.30)
 separates in-scope from out-of-scope questions with a wider margin. It is English-only
 and trained on web search queries (MS MARCO), so I would re-run `eval/run_eval.py` before
 using it on other documents. The local default stays `bge-reranker-base` so the recorded
