@@ -66,21 +66,49 @@ def load_pipeline() -> QAPipeline:
     return QAPipeline(s)
 
 
+# Sidebar examples, grouped by what they demonstrate. The negative groups come from
+# eval/questions.jsonl, where each one is labelled and graded.
+EXAMPLES = [
+    ("Answered from the manual", "Each sentence cites chapter, section, and page; click a citation for the exact quote.", [
+        ("When is modifier 59 appropriate, and what are XE, XS, XP, XU?", "cites Chapter I, Section E"),
+        ("Can an E&M service be reported on the same day as a minor surgical procedure?", "modifier 25, significant and separately identifiable"),
+        ("If a diagnostic arthroscopy leads to a surgical arthroscopy, can both be reported?", "only the surgical one; Chapter IV, Section E"),
+    ]),
+    ("Off-topic: refused before the LLM", "The relevance gate blocks these, so no model call is made. Calibrated on 10 such questions.", [
+        ("What is the 2026 Medicare Part B monthly premium?", "Medicare words, but not in the manual: refused"),
+        ("Which hospitals in Texas have the best cardiology ratings?", "highest-scoring off-topic question (0.05): a gate at 0.05 would pass it; the default 0.30 keeps a wide margin"),
+    ]),
+    ("Coding questions the manual can't answer", "Hard negatives: on-topic, but the value lives in another CMS source. The app must not invent it.", [
+        ("How many days is the global surgical period for CPT 27447?", "the manual explains global periods but never names 27447: says so instead of '90 days'"),
+        ("What are the 2026 work RVUs for CPT 99213?", "RVUs are in the fee schedule: refused, no number"),
+        ("What is the timely filing limit for a corrected claim with modifier 59?", "passes the gate (on-topic) but the model abstains"),
+    ]),
+    ("Exact facts from the CMS edit tables", "Rows from the PTP and MUE files are cited next to the manual section that explains them.", [
+        ("What is the MUE value for CPT 64450?", "10 units, from the MUE table. Before the claim check the app answered 'one', borrowed from trichiasis codes"),
+        ("Can CPT 29880 and 29881 be reported together for the same knee?", "active PTP edit, modifier indicator 1, plus Chapter I, Section E"),
+    ]),
+]
+
+
+def _ask(question: str) -> None:
+    st.session_state.pending_question = question
+
+
 asked = st.session_state.setdefault("asked", 0)
 left = questions_left(asked, settings.max_questions_per_session)
 
 with st.sidebar:
     chapter = st.selectbox("Limit to chapter", CHAPTERS, index=0)
     debug = st.toggle("Show retrieval details", value=False)
-    st.markdown(
-        "Examples:\n"
-        "- When is modifier 59 appropriate, and what are XE, XS, XP, XU?\n"
-        "- What is a Medically Unlikely Edit?\n"
-        "- Can an E&M service be reported on the same day as a minor procedure?\n"
-        "- How are add-on codes handled?\n"
-        "- Can 29880 and 29881 be reported together?  _(edit tables)_\n"
-        "- What is the MUE for 64450?  _(edit tables)_"
-    )
+    st.markdown("**Try these** (turn on *Show retrieval details* to see the gate score and any removed sentences)")
+    for group, intro, examples in EXAMPLES:
+        if group == "Exact facts from the CMS edit tables" and not settings.edits_db.exists():
+            continue
+        st.markdown(f"**{group}**")
+        st.caption(intro)
+        for i, (q, look_for) in enumerate(examples):
+            st.button(q, key=f"ex-{group}-{i}", on_click=_ask, args=(q,), disabled=left == 0, help=look_for)
+            st.caption(f"↳ {look_for}")
     st.caption("Edit tables loaded: " + ("yes" if settings.edits_db.exists() else "no (manual only)"))
     if left is not None:
         st.caption(f"Questions left in this session: {left}")
@@ -144,6 +172,8 @@ for i, turn in enumerate(history):
 if left == 0:
     st.info("This session has reached its question limit. Open a new session to ask more.")
 question = st.chat_input("Ask about NCCI coding policy...", disabled=left == 0)
+if not question and left != 0:  # a sidebar example was clicked
+    question = st.session_state.pop("pending_question", None)
 if question:
     st.session_state.asked += 1
     st.session_state.history.append({"role": "user", "content": question})
