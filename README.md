@@ -1,5 +1,7 @@
 # NCCI Policy Manual Chat
 
+**Live demo:** https://ncci-policy-chat.streamlit.app (password shared separately). The sidebar has clickable example questions, grouped by what they show: answers with citations, off-topic questions refused, and coding questions the manual cannot answer.
+
 Ask questions about the **CMS 2026 Medicare NCCI Policy Manual** and get answers that come only from the manual. Every sentence in an answer cites the chapter, section, and page it came from. When the manual does not cover a question, the app says so instead of guessing.
 
 Each answer is followed by its sources, in this format (taken from the real index):
