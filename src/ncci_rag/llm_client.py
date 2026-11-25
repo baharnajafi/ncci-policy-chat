@@ -19,5 +19,8 @@ def get_client():
             api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21"),
         )
     if not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is not set. Copy .env.example to .env and add your key.")
+        raise RuntimeError(
+            "OPENAI_API_KEY is not set. Locally: copy .env.example to .env and add your key. "
+            "Hosted (Streamlit Community Cloud): add OPENAI_API_KEY under Manage app -> Settings -> Secrets."
+        )
     return OpenAI()

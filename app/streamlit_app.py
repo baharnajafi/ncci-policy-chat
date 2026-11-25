@@ -42,16 +42,27 @@ st.caption(
 )
 
 # ---------------------------------------------------------------- access
+def _secret(name: str) -> str | None:
+    """Read a secret live from st.secrets (so an edit in the platform's settings applies
+    without a reboot), falling back to the environment for local runs."""
+    with contextlib.suppress(Exception):
+        if st.secrets.load_if_toml_exists() and name in st.secrets:
+            return str(st.secrets[name]).strip() or None
+    return os.getenv(name)
+
+
 if not st.session_state.get("authenticated"):
-    expected = os.getenv("APP_PASSWORD")
+    expected = _secret("APP_PASSWORD")
     if password_ok(None, expected):
         st.session_state.authenticated = True
     else:
-        given = st.text_input("Password", type="password")
-        if given and password_ok(given, expected):
+        with st.form("login"):
+            given = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Enter")
+        if submitted and password_ok(given, expected):
             st.session_state.authenticated = True
             st.rerun()
-        if given:
+        if submitted:
             st.error("Wrong password.")
         st.stop()
 
